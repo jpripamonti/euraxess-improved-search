@@ -1,0 +1,92 @@
+job_types:
+  postdoc:
+    - postdoc
+    - post doc
+    - post-doc
+    - postdoctoral
+    - post doctoral
+    - post-doctoral
+    - postdoctoral researcher
+    - postdoctoral fellow
+    - postdoctoral fellowship
+    - postdoctoral position
+    - postdoctoral research associate
+    - postdoctoral associate
+    - postdoctoral scientist
+    - postdoctoral research fellow
+    - post-doctoral researcher
+    - post-doctoral fellow
+    - post-doctoral fellowship
+    - post-doctoral associate
+    - research associate           # typically post-PhD in European context
+    - research fellow               # typically post-PhD
+    - research scientist            # typically post-PhD
+    - junior researcher
+    - junior research scientist
+    - senior postdoc
+    - experienced researcher        # R2/R3 EURAXESS profile language
+    - recognised researcher         # R2 profile
+    - ater                          # French Attaché Temporaire d'Enseignement et de Recherche (post-PhD teaching+research)
+
+  phd:
+    - phd
+    - ph d
+    - ph.d
+    - doctoral
+    - doctoral candidate
+    - doctoral student
+    - doctoral fellow
+    - doctoral fellowship
+    - doctoral researcher
+    - doctoral position
+    - phd candidate
+    - phd student
+    - phd position
+    - phd scholarship
+    - phd fellowship
+    - phd researcher
+    - predoctoral
+    - pre-doctoral
+    - pre doctoral
+    - graduate student
+    - graduate researcher
+    - early stage researcher        # R1 EURAXESS profile language
+    - first stage researcher        # R1 EURAXESS profile language
+    - first-stage researcher
+    - junior investigator
+    - junior scientist
+    - msc position                  # Master's → PhD pipeline positions
+    - fellowship doctoral
+    - doctorat                      # French PhD position (Doctorat en / Sujet de doctorat)
+    - these de doctorat             # French doctoral thesis position
+
+  professor:
+    - professor
+    - assistant professor
+    - associate professor
+    - full professor
+    - tenure track
+    - tenure-track
+    - tenured
+    - faculty position
+    - faculty member
+    - faculty
+    - lecturer
+    - senior lecturer
+    - principal lecturer
+    - reader                        # UK equivalent of associate professor
+    - chair                         # "chair in X" or "chair of X"
+    - endowed chair
+    - visiting professor
+    - adjunct professor
+    - emeritus professor
+    - extraordinary professor
+    - research professor
+    - chaired professor
+    - principal investigator        # typically PI = group leader = professor-equivalent
+    - group leader                  # senior/professor-equivalent position
+    - research director             # CNRS/INRAE equivalent of professor
+    - directeur de recherche        # French CNRS senior position
+    - research group leader
+    - leading researcher            # R4 EURAXESS profile language
+    - established researcher        # R3 EURAXESS profile (senior, professor-level)
