@@ -11,10 +11,11 @@ Production-grade crawler and local hybrid-search pipeline for EURAXESS job offer
 
 - Resumable queue-based crawl (`pending/done/failed`)
 - Incremental updates with conditional requests (`If-None-Match` / `If-Modified-Since`)
+- Resilient discovery retries with explicit partial-scan detection
 - Deduplication by canonical EURAXESS job ID (`/jobs/<numeric_id>`)
 - Delisting tracking (`delisted_at`, no hard deletes)
 - Export to JSONL and Parquet
-- Hybrid keyword + semantic search using Reciprocal Rank Fusion (RRF)
+- Weighted hybrid keyword + semantic search using Reciprocal Rank Fusion (RRF)
 
 ## Project Layout
 
@@ -26,6 +27,7 @@ Production-grade crawler and local hybrid-search pipeline for EURAXESS job offer
 - `euraxess_scraper/indexing.py`: FTS5 + FAISS build
 - `euraxess_scraper/search.py`: hybrid retrieval and RRF merge
 - `euraxess_scraper/export.py`: JSONL / Parquet export
+- `scripts/scheduled_update.sh`: incremental refresh for cron/launchd
 - `tests/`: unit + integration tests
 
 ## Installation
@@ -61,6 +63,7 @@ Useful options:
 ```bash
 python -m euraxess_scraper.cli crawl --dry-run
 python -m euraxess_scraper.cli crawl --limit 10
+python -m euraxess_scraper.cli crawl --max-pages 30
 python -m euraxess_scraper.cli crawl --rps 1.0 --concurrency 3
 python -m euraxess_scraper.cli crawl --verbose
 ```
@@ -69,7 +72,12 @@ python -m euraxess_scraper.cli crawl --verbose
 
 ```bash
 python -m euraxess_scraper.cli update --rps 1.0 --concurrency 3
+python -m euraxess_scraper.cli update --max-pages 30 --no-delist --rps 0.4 --concurrency 2
 ```
+
+Notes:
+- Use `--max-pages` + `--no-delist` for fast incremental runs (new jobs from newest pages).
+- Use full `update` (without `--max-pages`) when you want reliable delisting.
 
 ### 3) Export
 
@@ -90,12 +98,28 @@ python -m euraxess_scraper.cli build-index --model all-MiniLM-L6-v2 --batch-size
 ```bash
 python -m euraxess_scraper.cli search --query "machine learning postdoc germany" --top-k 10
 python -m euraxess_scraper.cli search --query "data science" --country Germany
+python -m euraxess_scraper.cli search --query "computational biology" --vector-weight 3.0 --keyword-weight 1.0
+python -m euraxess_scraper.cli search --query "bioinformatics phd" --semantic-only
 ```
 
 ### 6) Stats
 
 ```bash
 python -m euraxess_scraper.cli stats
+```
+
+### 7) Recurring incremental updates (every few days)
+
+Run manually:
+
+```bash
+./scripts/scheduled_update.sh
+```
+
+Example cron entry (every 3 days at 06:00 local time):
+
+```bash
+0 6 */3 * * cd /Users/neo/Repos/Projects/euraxess_scraping && /bin/bash scripts/scheduled_update.sh >> data/exports/scheduled_update.log 2>&1
 ```
 
 ## Data Artifacts

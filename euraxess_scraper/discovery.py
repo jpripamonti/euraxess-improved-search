@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -17,6 +19,14 @@ from .utils import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class DiscoveryResult:
+    discovered_ids: set[str]
+    completed: bool
+    stop_reason: str | None
+    last_processed_page: int
 
 
 def page_url(search_url: str, page_number: int) -> str:
@@ -110,7 +120,9 @@ async def discover_jobs(
     requeue_existing: bool = False,
     max_pages: int | None = None,
     max_jobs: int | None = None,
-) -> set[str]:
+    max_page_failures: int = 6,
+    retry_cooldown_seconds: int = 20,
+) -> DiscoveryResult:
     logger = logger or LOGGER
 
     json_probe_url = await probe_endpoints(fetcher, logger=logger)
@@ -119,17 +131,42 @@ async def discover_jobs(
     discovered_ids: set[str] = set()
     page_seen_ids: set[str] = set()
     page = 0
+    last_processed_page = -1
+    stop_reason: str | None = None
+    completed = True
+    page_failures = 0
 
     while True:
         if max_pages is not None and page >= max_pages:
+            stop_reason = "max_pages"
             break
 
         base_page_url = json_probe_url if mode == "json" else config.SEARCH_URL
         url = page_url(base_page_url, page)
         result = await fetcher.get(url)
         if result.status != 200 or not result.text:
-            logger.warning("Discovery page %s fetch failed with status %s", page, result.status)
+            page_failures += 1
+            logger.warning(
+                "Discovery page %s fetch failed with status %s (attempt %s/%s)",
+                page,
+                result.status,
+                page_failures,
+                max_page_failures,
+            )
+            if page_failures < max_page_failures:
+                cooldown = retry_cooldown_seconds * page_failures
+                if result.status == 429:
+                    cooldown = max(cooldown, retry_cooldown_seconds * 2)
+                    logger.warning("Rate limited on discovery; sleeping %ss before retry", cooldown)
+                else:
+                    logger.warning("Sleeping %ss before retrying discovery page %s", cooldown, page)
+                await asyncio.sleep(cooldown)
+                continue
+            completed = False
+            stop_reason = f"page_{page}_status_{result.status}"
             break
+
+        page_failures = 0
 
         if mode == "json":
             try:
@@ -144,6 +181,7 @@ async def discover_jobs(
 
         if not links:
             logger.info("Discovery page %s has no job links; stopping", page)
+            stop_reason = "no_links"
             break
 
         new_on_page = 0
@@ -167,17 +205,27 @@ async def discover_jobs(
             mode,
             (max(pages) + 1) if pages else "unknown",
         )
+        last_processed_page = page
 
         if new_on_page == 0:
             logger.info("Discovery page %s yielded zero new job IDs; stopping", page)
+            stop_reason = "no_new_ids"
             break
         if max_jobs is not None and len(discovered_ids) >= max_jobs:
             logger.info("Discovery reached max_jobs=%s; stopping", max_jobs)
+            stop_reason = "max_jobs"
             break
 
         page += 1
 
-    db.set_state(conn, "discovery:last_page", str(page))
+    db.set_state(conn, "discovery:last_page", str(last_processed_page))
     db.set_state(conn, "discovery:last_run_at", now_utc_iso())
     db.set_state(conn, "discovery:last_run_new_ids", str(len(discovered_ids)))
-    return discovered_ids
+    db.set_state(conn, "discovery:last_completed", "1" if completed else "0")
+    db.set_state(conn, "discovery:last_stop_reason", stop_reason or "")
+    return DiscoveryResult(
+        discovered_ids=discovered_ids,
+        completed=completed,
+        stop_reason=stop_reason,
+        last_processed_page=last_processed_page,
+    )

@@ -78,12 +78,14 @@ def rrf_merge(
     vector_ranked: list[tuple[str, int]],
     *,
     k: int = config.RRF_K,
+    keyword_weight: float = 1.0,
+    vector_weight: float = 1.0,
 ) -> list[tuple[str, float]]:
     scores: dict[str, float] = {}
     for job_id, rank in fts_ranked:
-        scores[job_id] = scores.get(job_id, 0.0) + 1.0 / (k + rank)
+        scores[job_id] = scores.get(job_id, 0.0) + (keyword_weight / (k + rank))
     for job_id, rank in vector_ranked:
-        scores[job_id] = scores.get(job_id, 0.0) + 1.0 / (k + rank)
+        scores[job_id] = scores.get(job_id, 0.0) + (vector_weight / (k + rank))
     return sorted(scores.items(), key=lambda item: item[1], reverse=True)
 
 
@@ -110,10 +112,19 @@ def hybrid_search(
     country: str | None = None,
     rrf_k: int = config.RRF_K,
     model_name: str = config.EMBEDDING_MODEL,
+    keyword_weight: float = 1.0,
+    vector_weight: float = 2.0,
+    semantic_only: bool = False,
 ) -> list[dict]:
-    fts_ranked = query_fts(conn, query, limit=100)
+    fts_ranked = [] if semantic_only else query_fts(conn, query, limit=100)
     vector_ranked = query_vector(query, limit=100, model_name=model_name)
-    merged = rrf_merge(fts_ranked, vector_ranked, k=rrf_k)
+    merged = rrf_merge(
+        fts_ranked,
+        vector_ranked,
+        k=rrf_k,
+        keyword_weight=keyword_weight,
+        vector_weight=vector_weight,
+    )
 
     job_ids = [job_id for job_id, _ in merged]
     metadata = _metadata_for_jobs(conn, job_ids)

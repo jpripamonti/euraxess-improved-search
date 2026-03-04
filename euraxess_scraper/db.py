@@ -92,6 +92,16 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    # Backfill rows affected by older logic that persisted 304 on previously fetched jobs.
+    conn.execute(
+        """
+        UPDATE jobs
+        SET http_status = 200
+        WHERE http_status = 304
+          AND cleaned_text IS NOT NULL
+          AND TRIM(cleaned_text) != ''
+        """
+    )
     conn.commit()
 
 
@@ -213,8 +223,8 @@ def touch_job_not_modified(
         UPDATE jobs
         SET fetched_at = ?,
             last_seen_at = ?,
-            http_status = 304,
             error = NULL,
+            delisted_at = NULL,
             etag = COALESCE(?, etag),
             last_modified = COALESCE(?, last_modified)
         WHERE job_id = ?

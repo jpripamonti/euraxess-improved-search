@@ -188,6 +188,8 @@ async def _crawl_or_update(
     dry_run: bool,
     rps: float,
     concurrency: int,
+    max_pages: int | None,
+    mark_delisted: bool,
     logger: logging.Logger,
 ) -> dict[str, Any]:
     conn = _open_db()
@@ -207,20 +209,24 @@ async def _crawl_or_update(
     active_before = db.get_active_job_ids(conn) if update_mode else set()
 
     async with Fetcher(rps=rps, user_agent=config.USER_AGENT) as fetcher:
-        discovered_ids = await discovery.discover_jobs(
+        discovery_result = await discovery.discover_jobs(
             conn,
             fetcher,
             logger=logger,
             requeue_existing=update_mode,
+            max_pages=max_pages,
             max_jobs=(limit if (limit is not None and not update_mode) else None),
         )
 
         if dry_run:
             db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
             return {
-                "discovered": len(discovered_ids),
+                "discovered": len(discovery_result.discovered_ids),
                 "processed": 0,
                 "dry_run": True,
+                "discovery_completed": discovery_result.completed,
+                "discovery_stop_reason": discovery_result.stop_reason,
+                "discovery_last_page": discovery_result.last_processed_page,
                 "halted": False,
                 "halt_reason": None,
             }
@@ -235,16 +241,35 @@ async def _crawl_or_update(
         )
 
     delisted_count = 0
+    discovered_ids = discovery_result.discovered_ids
+    full_scan = (
+        discovery_result.completed
+        and max_pages is None
+        and discovery_result.stop_reason in {"no_links", "no_new_ids"}
+    )
     if update_mode:
-        missing = active_before - discovered_ids
-        delisted_count = db.mark_delisted(conn, missing, now_utc_iso())
-        logger.info("Marked %s jobs as delisted", delisted_count)
+        if mark_delisted and full_scan:
+            missing = active_before - discovered_ids
+            delisted_count = db.mark_delisted(conn, missing, now_utc_iso())
+            logger.info("Marked %s jobs as delisted", delisted_count)
+        elif mark_delisted:
+            logger.warning(
+                "Skipped delisted marking because discovery was not a complete scan "
+                "(completed=%s, stop_reason=%s, max_pages=%s)",
+                discovery_result.completed,
+                discovery_result.stop_reason,
+                max_pages,
+            )
 
     db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
     return {
         "discovered": len(discovered_ids),
         "dry_run": False,
         "delisted": delisted_count,
+        "discovery_completed": discovery_result.completed,
+        "discovery_stop_reason": discovery_result.stop_reason,
+        "discovery_last_page": discovery_result.last_processed_page,
+        "discovery_full_scan": full_scan,
         **processing_result,
     }
 
@@ -252,6 +277,12 @@ async def _crawl_or_update(
 @app.command()
 def crawl(
     limit: int | None = typer.Option(None, "--limit", help="Max jobs to fetch details for"),
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        min=1,
+        help="Limit discovery to the first N listing pages",
+    ),
     rps: float = typer.Option(config.DEFAULT_RPS, "--rps", help="Requests per second"),
     concurrency: int = typer.Option(
         config.DEFAULT_CONCURRENCY,
@@ -269,6 +300,8 @@ def crawl(
             dry_run=dry_run,
             rps=rps,
             concurrency=concurrency,
+            max_pages=max_pages,
+            mark_delisted=False,
             logger=LOGGER,
         )
     )
@@ -279,6 +312,17 @@ def crawl(
 
 @app.command()
 def update(
+    max_pages: int | None = typer.Option(
+        None,
+        "--max-pages",
+        min=1,
+        help="Limit discovery to the first N listing pages (for faster incremental runs)",
+    ),
+    delist: bool = typer.Option(
+        True,
+        "--delist/--no-delist",
+        help="Mark jobs as delisted only after a complete discovery scan",
+    ),
     rps: float = typer.Option(config.DEFAULT_RPS, "--rps", help="Requests per second"),
     concurrency: int = typer.Option(
         config.DEFAULT_CONCURRENCY,
@@ -295,6 +339,8 @@ def update(
             dry_run=False,
             rps=rps,
             concurrency=concurrency,
+            max_pages=max_pages,
+            mark_delisted=delist,
             logger=LOGGER,
         )
     )
@@ -350,6 +396,14 @@ def search(
     top_k: int = typer.Option(10, "--top-k", help="Top K results"),
     country: str | None = typer.Option(None, "--country", help="Country filter"),
     rrf_k: int = typer.Option(config.RRF_K, "--rrf-k", help="RRF constant"),
+    model: str = typer.Option(config.EMBEDDING_MODEL, "--model", help="Embedding model for semantic search"),
+    keyword_weight: float = typer.Option(1.0, "--keyword-weight", help="Weight for keyword (FTS) ranking"),
+    vector_weight: float = typer.Option(2.0, "--vector-weight", help="Weight for semantic vector ranking"),
+    semantic_only: bool = typer.Option(
+        False,
+        "--semantic-only",
+        help="Use semantic vector search only (no FTS keyword ranking)",
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs"),
 ) -> None:
     config.setup_logging(verbose)
@@ -361,6 +415,10 @@ def search(
             top_k=top_k,
             country=country,
             rrf_k=rrf_k,
+            model_name=model,
+            keyword_weight=keyword_weight,
+            vector_weight=vector_weight,
+            semantic_only=semantic_only,
         )
     except ImportError as exc:
         raise typer.BadParameter(
