@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
-from euraxess_scraper import db, search
+from euraxess_scraper import db, indexing, search
+
+MISSING_INDEX_DIR = Path("/tmp/euraxess_missing_index")
 
 
 def _conn():
@@ -49,10 +52,42 @@ def test_strict_type_filter_is_applied():
         active_only=False,
         open_only=False,
         limit=20,
+        index_dir=MISSING_INDEX_DIR,
     )
 
     assert rows
     assert {row["job_type_inferred"] for row in rows} == {"phd"}
+
+
+def test_postdoc_query_matches_postdoctoral_variant():
+    conn = _conn()
+    _insert_job(
+        conn,
+        job_id="15",
+        title="Postdoctoral Research Fellow",
+        job_type_inferred="postdoc",
+        cleaned_text="Postdoctoral position in molecular biology.",
+    )
+    _insert_job(
+        conn,
+        job_id="16",
+        title="PhD Candidate",
+        job_type_inferred="phd",
+        cleaned_text="Doctoral training position.",
+    )
+    indexing.rebuild_fts(conn)
+
+    rows = search.hybrid_search(
+        conn,
+        query="postdoc",
+        active_only=False,
+        open_only=False,
+        limit=20,
+        index_dir=MISSING_INDEX_DIR,
+    )
+
+    ids = {row["job_id"] for row in rows}
+    assert "15" in ids
 
 
 def test_default_filters_exclude_closed_and_delisted():
@@ -73,7 +108,7 @@ def test_default_filters_exclude_closed_and_delisted():
         delisted_at="2026-03-02T00:00:00Z",
     )
 
-    rows = search.hybrid_search(conn, query="", limit=50)
+    rows = search.hybrid_search(conn, query="", limit=50, index_dir=MISSING_INDEX_DIR)
     ids = {row["job_id"] for row in rows}
 
     assert ids == {"20"}
@@ -91,8 +126,8 @@ def test_all_mode_can_return_multiple_job_types():
         active_only=False,
         open_only=False,
         limit=50,
+        index_dir=MISSING_INDEX_DIR,
     )
     job_types = {row["job_type_inferred"] for row in rows}
 
     assert {"postdoc", "phd", "professor"}.issubset(job_types)
-

@@ -2,24 +2,52 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from . import config
-from .taxonomy import canonicalize_query, expand_query, normalize_job_type_filter
+from .taxonomy import canonicalize_query, load_synonyms, normalize_job_type_filter
 from .utils import clean_text, now_utc_iso
 
 
-def _fts_query_text(query: str) -> str:
+@lru_cache(maxsize=2)
+def _load_embedding_model(name: str):
+    from sentence_transformers import SentenceTransformer
+
+    # Force CPU in query-time inference to avoid unstable MPS/meta tensor issues
+    # under threaded web serving on some local environments.
+    try:
+        return SentenceTransformer(name, device="cpu")
+    except TypeError:
+        return SentenceTransformer(name)
+
+
+def _fts_query_text(query: str, *, synonyms_path: str | None = None) -> str:
     tokens = [tok for tok in clean_text(query).split(" ") if tok]
     if not tokens:
         return ""
-    # Phrase-like behavior per token to avoid special token parse errors.
-    return " ".join([f'"{tok}"' for tok in tokens])
+    aliases = load_synonyms(synonyms_path)
+    groups: list[str] = []
+    for token in tokens:
+        if token in aliases:
+            variants = [token, *[alias for alias in aliases[token] if alias != token]]
+            quoted = [f'"{variant}"' for variant in variants]
+            groups.append(f"({' OR '.join(quoted)})")
+        else:
+            groups.append(f'"{token}"')
+    # Explicit AND keeps multi-term intent, while type synonyms expand as OR groups.
+    return " AND ".join(groups)
 
 
-def query_fts(conn, query: str, limit: int = 100) -> list[tuple[str, int]]:
-    text = _fts_query_text(query)
+def query_fts(
+    conn,
+    query: str,
+    *,
+    limit: int = 100,
+    synonyms_path: str | None = None,
+) -> list[tuple[str, int]]:
+    text = _fts_query_text(query, synonyms_path=synonyms_path)
     if not text:
         return []
     try:
@@ -49,30 +77,49 @@ def query_vector(
     model_name: str = config.EMBEDDING_MODEL,
 ) -> list[tuple[str, int]]:
     index_dir = index_dir or config.INDEX_DIR
-    index_path = index_dir / "faiss.index"
     map_path = index_dir / "faiss_mapping.json"
-    if not index_path.exists() or not map_path.exists():
+    vectors_path = index_dir / "vectors.npy"
+    if not map_path.exists() or not vectors_path.exists():
         return []
 
-    import faiss
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
+    try:
+        import numpy as np
+    except ImportError:
+        return []
 
     mapping = json.loads(map_path.read_text(encoding="utf-8"))
     if not mapping:
         return []
 
-    index = faiss.read_index(str(index_path))
-    model = SentenceTransformer(model_name)
-    vector = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-    vector = np.asarray(vector, dtype="float32")
+    try:
+        matrix = np.load(vectors_path, mmap_mode="r")
+        if matrix.ndim != 2 or matrix.shape[0] == 0:
+            return []
+        model = _load_embedding_model(model_name)
+        vector = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+        vector = np.asarray(vector, dtype="float32")
+        if matrix.shape[1] != vector.shape[0]:
+            return []
+    except Exception:
+        return []
 
-    _scores, indices = index.search(vector, min(limit, len(mapping)))
+    k = min(int(limit), len(mapping), int(matrix.shape[0]))
+    if k <= 0:
+        return []
+
+    scores = np.asarray(matrix @ vector, dtype="float32")
+    if k == len(scores):
+        indices = np.argsort(scores)[::-1]
+    else:
+        indices = np.argpartition(scores, -k)[-k:]
+        indices = indices[np.argsort(scores[indices])[::-1]]
+
     out: list[tuple[str, int]] = []
-    for rank, idx in enumerate(indices[0], start=1):
-        if idx < 0:
+    for rank, idx in enumerate(indices[:k], start=1):
+        mapped_idx = int(idx)
+        if mapped_idx < 0 or mapped_idx >= len(mapping):
             continue
-        out.append((mapping[idx], rank))
+        out.append((mapping[mapped_idx], rank))
     return out
 
 
@@ -246,10 +293,14 @@ def _hybrid_jobs(
             open_only=open_only,
         )
 
-    query_expanded = expand_query(query, synonyms_path=synonyms_path)
     candidate_pool = max(500, offset + (limit * 12))
 
-    fts_ranked = [] if semantic_only else query_fts(conn, query_expanded, limit=candidate_pool)
+    fts_ranked = [] if semantic_only else query_fts(
+        conn,
+        query_canonical,
+        limit=candidate_pool,
+        synonyms_path=synonyms_path,
+    )
     vector_ranked = query_vector(
         query_canonical,
         limit=candidate_pool,
