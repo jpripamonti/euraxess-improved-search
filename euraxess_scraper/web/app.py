@@ -29,6 +29,13 @@ def create_app(
     selected_db_path = Path(db_path) if db_path is not None else config.DB_PATH
     selected_index_dir = Path(index_dir) if index_dir is not None else config.INDEX_DIR
 
+    # Run schema setup once at startup instead of on every request.
+    _init_conn = db.get_connection(selected_db_path)
+    try:
+        db.init_db(_init_conn)
+    finally:
+        _init_conn.close()
+
     def _search_payload(
         *,
         q: str,
@@ -45,7 +52,6 @@ def create_app(
     ) -> dict:
         conn = db.get_connection(selected_db_path)
         try:
-            db.init_db(conn)
             return search_mod.hybrid_search_page(
                 conn,
                 query=q,
@@ -228,7 +234,6 @@ def create_app(
     ) -> HTMLResponse:
         conn = db.get_connection(selected_db_path)
         try:
-            db.init_db(conn)
             row = db.get_job_detail(conn, job_id)
             if row is None:
                 raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -250,7 +255,6 @@ def create_app(
     def api_job_detail(job_id: str) -> dict:
         conn = db.get_connection(selected_db_path)
         try:
-            db.init_db(conn)
             row = db.get_job_detail(conn, job_id)
             if row is None:
                 raise HTTPException(status_code=404, detail=f"Job {job_id} not found")

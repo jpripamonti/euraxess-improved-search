@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from . import config
+
+LOGGER = logging.getLogger(__name__)
 from .taxonomy import canonicalize_query, load_synonyms, normalize_job_type_filter
 from .topics import TOPIC_OTHER, load_topic_domains, normalize_topic_filters
 from .utils import clean_text, now_utc_iso
@@ -65,7 +68,8 @@ def query_fts(
             """,
             (text, limit),
         ).fetchall()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        LOGGER.warning("FTS query failed for %r: %s", text, exc)
         return []
     return [(row["job_id"], idx + 1) for idx, row in enumerate(rows)]
 
@@ -106,7 +110,8 @@ def query_vector(
         vector = np.asarray(vector, dtype="float32")
         if matrix.shape[1] != vector.shape[0]:
             return []
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("Vector search failed: %s", exc)
         return []
 
     k = min(int(limit), len(mapping), int(matrix.shape[0]))
@@ -263,7 +268,8 @@ def rerank_candidates(
         query_vec = vectors[0]
         doc_vectors = vectors[1:]
         sims = np.asarray(doc_vectors @ query_vec, dtype="float32")
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("Reranking failed: %s", exc)
         return candidates
 
     q_norm = clean_text(query).lower()

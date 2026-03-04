@@ -295,85 +295,88 @@ async def _crawl_or_update(
     logger: logging.Logger,
 ) -> dict[str, Any]:
     conn = _open_db()
-    _warn_user_agent(logger)
+    try:
+        _warn_user_agent(logger)
 
-    run_key = "update" if update_mode else "crawl"
-    db.set_state(conn, f"{run_key}:last_start", now_utc_iso())
+        run_key = "update" if update_mode else "crawl"
+        db.set_state(conn, f"{run_key}:last_start", now_utc_iso())
 
-    robots = robots_diagnostic(config.SEARCH_URL, config.USER_AGENT)
-    if robots["error"]:
-        logger.warning("robots.txt check failed: %s", robots["error"])
-    elif not robots["allowed"]:
-        logger.warning("robots.txt disallows target path; continuing as requested")
-    else:
-        logger.info("robots.txt allows target path")
+        robots = robots_diagnostic(config.SEARCH_URL, config.USER_AGENT)
+        if robots["error"]:
+            logger.warning("robots.txt check failed: %s", robots["error"])
+        elif not robots["allowed"]:
+            logger.warning("robots.txt disallows target path; continuing as requested")
+        else:
+            logger.info("robots.txt allows target path")
 
-    active_before = db.get_active_job_ids(conn) if update_mode else set()
+        active_before = db.get_active_job_ids(conn) if update_mode else set()
 
-    async with Fetcher(rps=rps, user_agent=config.USER_AGENT) as fetcher:
-        discovery_result = await discovery.discover_jobs(
-            conn,
-            fetcher,
-            logger=logger,
-            requeue_existing=update_mode,
-            max_pages=max_pages,
-            max_jobs=(limit if (limit is not None and not update_mode) else None),
-        )
-
-        if dry_run:
-            db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
-            return {
-                "discovered": len(discovery_result.discovered_ids),
-                "processed": 0,
-                "dry_run": True,
-                "discovery_completed": discovery_result.completed,
-                "discovery_stop_reason": discovery_result.stop_reason,
-                "discovery_last_page": discovery_result.last_processed_page,
-                "halted": False,
-                "halt_reason": None,
-            }
-
-        processing_result = await _process_pending_jobs(
-            conn,
-            fetcher,
-            logger=logger,
-            limit=limit,
-            update_mode=update_mode,
-            concurrency=concurrency,
-        )
-
-    delisted_count = 0
-    discovered_ids = discovery_result.discovered_ids
-    full_scan = (
-        discovery_result.completed
-        and max_pages is None
-        and discovery_result.stop_reason in {"no_links", "no_new_ids"}
-    )
-    if update_mode:
-        if mark_delisted and full_scan:
-            missing = active_before - discovered_ids
-            delisted_count = db.mark_delisted(conn, missing, now_utc_iso())
-            logger.info("Marked %s jobs as delisted", delisted_count)
-        elif mark_delisted:
-            logger.warning(
-                "Skipped delisted marking because discovery was not a complete scan "
-                "(completed=%s, stop_reason=%s, max_pages=%s)",
-                discovery_result.completed,
-                discovery_result.stop_reason,
-                max_pages,
+        async with Fetcher(rps=rps, user_agent=config.USER_AGENT) as fetcher:
+            discovery_result = await discovery.discover_jobs(
+                conn,
+                fetcher,
+                logger=logger,
+                requeue_existing=update_mode,
+                max_pages=max_pages,
+                max_jobs=(limit if (limit is not None and not update_mode) else None),
             )
 
-    db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
-    return {
-        "discovered": len(discovered_ids),
-        "dry_run": False,
-        "delisted": delisted_count,
-        "discovery_completed": discovery_result.completed,
-        "discovery_stop_reason": discovery_result.stop_reason,
-        "discovery_last_page": discovery_result.last_processed_page,
-        "discovery_full_scan": full_scan,
-        **processing_result,
-    }
+            if dry_run:
+                db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
+                return {
+                    "discovered": len(discovery_result.discovered_ids),
+                    "processed": 0,
+                    "dry_run": True,
+                    "discovery_completed": discovery_result.completed,
+                    "discovery_stop_reason": discovery_result.stop_reason,
+                    "discovery_last_page": discovery_result.last_processed_page,
+                    "halted": False,
+                    "halt_reason": None,
+                }
+
+            processing_result = await _process_pending_jobs(
+                conn,
+                fetcher,
+                logger=logger,
+                limit=limit,
+                update_mode=update_mode,
+                concurrency=concurrency,
+            )
+
+        delisted_count = 0
+        discovered_ids = discovery_result.discovered_ids
+        full_scan = (
+            discovery_result.completed
+            and max_pages is None
+            and discovery_result.stop_reason in {"no_links", "no_new_ids"}
+        )
+        if update_mode:
+            if mark_delisted and full_scan:
+                missing = active_before - discovered_ids
+                delisted_count = db.mark_delisted(conn, missing, now_utc_iso())
+                logger.info("Marked %s jobs as delisted", delisted_count)
+            elif mark_delisted:
+                logger.warning(
+                    "Skipped delisted marking because discovery was not a complete scan "
+                    "(completed=%s, stop_reason=%s, max_pages=%s)",
+                    discovery_result.completed,
+                    discovery_result.stop_reason,
+                    max_pages,
+                )
+
+        db.set_state(conn, f"{run_key}:last_end", now_utc_iso())
+        return {
+            "discovered": len(discovered_ids),
+            "dry_run": False,
+            "delisted": delisted_count,
+            "discovery_completed": discovery_result.completed,
+            "discovery_stop_reason": discovery_result.stop_reason,
+            "discovery_last_page": discovery_result.last_processed_page,
+            "discovery_full_scan": full_scan,
+            **processing_result,
+        }
+    finally:
+        conn.close()
 
 
 @app.command()
@@ -459,20 +462,22 @@ def export_command(
 ) -> None:
     config.setup_logging(verbose)
     conn = _open_db()
+    try:
+        fmt = format.lower()
+        if fmt not in {"jsonl", "parquet"}:
+            raise typer.BadParameter("--format must be one of: jsonl, parquet")
 
-    fmt = format.lower()
-    if fmt not in {"jsonl", "parquet"}:
-        raise typer.BadParameter("--format must be one of: jsonl, parquet")
+        if output is None:
+            output = config.EXPORT_DIR / ("jobs.jsonl" if fmt == "jsonl" else "jobs.parquet")
 
-    if output is None:
-        output = config.EXPORT_DIR / ("jobs.jsonl" if fmt == "jsonl" else "jobs.parquet")
+        if fmt == "jsonl":
+            count = export_mod.export_jsonl(conn, output)
+        else:
+            count = export_mod.export_parquet(conn, output)
 
-    if fmt == "jsonl":
-        count = export_mod.export_jsonl(conn, output)
-    else:
-        count = export_mod.export_parquet(conn, output)
-
-    console.print({"format": fmt, "output": str(output), "rows": count})
+        console.print({"format": fmt, "output": str(output), "rows": count})
+    finally:
+        conn.close()
 
 
 @app.command("build-index")
@@ -484,12 +489,15 @@ def build_index(
     config.setup_logging(verbose)
     conn = _open_db()
     try:
-        info = indexing.build_indexes(conn, model_name=model, batch_size=batch_size)
-    except ImportError as exc:
-        raise typer.BadParameter(
-            "Missing indexing dependencies. Install project dependencies first."
-        ) from exc
-    console.print(info)
+        try:
+            info = indexing.build_indexes(conn, model_name=model, batch_size=batch_size)
+        except ImportError as exc:
+            raise typer.BadParameter(
+                "Missing indexing dependencies. Install project dependencies first."
+            ) from exc
+        console.print(info)
+    finally:
+        conn.close()
 
 
 @app.command()
@@ -499,37 +507,41 @@ def reclassify(
 ) -> None:
     config.setup_logging(verbose)
     conn = _open_db()
+    try:
+        rows = db.jobs_for_reclassification(conn, limit=limit)
+        updated = 0
+        for row in rows:
+            classification = taxonomy.classify_job_type(
+                title=row["title"],
+                researcher_profile=row["researcher_profile"],
+                cleaned_text=row["cleaned_text"],
+            )
+            db.update_job_type_classification(
+                conn,
+                job_id=row["job_id"],
+                job_type_inferred=classification.job_type,
+                job_type_score=classification.score,
+            )
+            updated += 1
+            if updated % 100 == 0:
+                conn.commit()
+        conn.commit()
 
-    rows = db.jobs_for_reclassification(conn, limit=limit)
-    updated = 0
-    for row in rows:
-        classification = taxonomy.classify_job_type(
-            title=row["title"],
-            researcher_profile=row["researcher_profile"],
-            cleaned_text=row["cleaned_text"],
-        )
-        db.update_job_type_classification(
-            conn,
-            job_id=row["job_id"],
-            job_type_inferred=classification.job_type,
-            job_type_score=classification.score,
-        )
-        updated += 1
-    conn.commit()
-
-    counts = conn.execute(
-        """
-        SELECT COALESCE(job_type_inferred, 'unknown') AS job_type, COUNT(*) AS c
-        FROM jobs
-        WHERE http_status = 200
-          AND cleaned_text IS NOT NULL
-          AND TRIM(cleaned_text) != ''
-        GROUP BY COALESCE(job_type_inferred, 'unknown')
-        ORDER BY c DESC
-        """
-    ).fetchall()
-    breakdown = {row["job_type"]: int(row["c"]) for row in counts}
-    console.print({"updated": updated, "breakdown": breakdown})
+        counts = conn.execute(
+            """
+            SELECT COALESCE(job_type_inferred, 'unknown') AS job_type, COUNT(*) AS c
+            FROM jobs
+            WHERE http_status = 200
+              AND cleaned_text IS NOT NULL
+              AND TRIM(cleaned_text) != ''
+            GROUP BY COALESCE(job_type_inferred, 'unknown')
+            ORDER BY c DESC
+            """
+        ).fetchall()
+        breakdown = {row["job_type"]: int(row["c"]) for row in counts}
+        console.print({"updated": updated, "breakdown": breakdown})
+    finally:
+        conn.close()
 
 
 @app.command("classify-topics")
@@ -551,67 +563,70 @@ def classify_topics(
 ) -> None:
     config.setup_logging(verbose)
     conn = _open_db()
-    rows = db.jobs_for_topic_classification(
-        conn,
-        limit=limit,
-        only_missing=only_missing,
-        since=since,
-    )
-    if not rows:
-        console.print({"updated": 0, "breakdown": {}})
-        return
-
-    updated = 0
-    breakdown: dict[str, int] = {}
-    topic_updated_at = now_utc_iso()
-    for start in range(0, len(rows), max(1, int(batch_size))):
-        row_chunk = rows[start : start + max(1, int(batch_size))]
-        item_chunk = [
-            {
-                "title": row["title"],
-                "cleaned_text": row["cleaned_text"],
-                "sections": db.parse_sections_json(row),
-            }
-            for row in row_chunk
-        ]
-        classified = topics.classify_topics_batch(
-            item_chunk,
-            model_name=model,
-            batch_size=batch_size,
+    try:
+        rows = db.jobs_for_topic_classification(
+            conn,
+            limit=limit,
+            only_missing=only_missing,
+            since=since,
         )
-        for row, result in zip(row_chunk, classified):
-            db.update_job_topic_classification(
-                conn,
-                job_id=str(row["job_id"]),
-                topic_domain=result.topic_domain,
-                topic_confidence=result.confidence,
-                topic_scores_json=json.dumps(result.scores, ensure_ascii=False, sort_keys=True),
-                topic_model=model,
-                topic_updated_at=topic_updated_at,
-            )
-            updated += 1
-            breakdown[result.topic_domain] = breakdown.get(result.topic_domain, 0) + 1
-        conn.commit()
+        if not rows:
+            console.print({"updated": 0, "breakdown": {}})
+            return
 
-    counts = conn.execute(
-        """
-        SELECT COALESCE(topic_domain, 'other') AS topic_domain, COUNT(*) AS c
-        FROM jobs
-        WHERE http_status = 200
-          AND cleaned_text IS NOT NULL
-          AND TRIM(cleaned_text) != ''
-        GROUP BY COALESCE(topic_domain, 'other')
-        ORDER BY c DESC
-        """
-    ).fetchall()
-    global_breakdown = {row["topic_domain"]: int(row["c"]) for row in counts}
-    console.print(
-        {
-            "updated": updated,
-            "batch_breakdown": breakdown,
-            "global_breakdown": global_breakdown,
-        }
-    )
+        updated = 0
+        breakdown: dict[str, int] = {}
+        topic_updated_at = now_utc_iso()
+        for start in range(0, len(rows), max(1, int(batch_size))):
+            row_chunk = rows[start : start + max(1, int(batch_size))]
+            item_chunk = [
+                {
+                    "title": row["title"],
+                    "cleaned_text": row["cleaned_text"],
+                    "sections": db.parse_sections_json(row),
+                }
+                for row in row_chunk
+            ]
+            classified = topics.classify_topics_batch(
+                item_chunk,
+                model_name=model,
+                batch_size=batch_size,
+            )
+            for row, result in zip(row_chunk, classified):
+                db.update_job_topic_classification(
+                    conn,
+                    job_id=str(row["job_id"]),
+                    topic_domain=result.topic_domain,
+                    topic_confidence=result.confidence,
+                    topic_scores_json=json.dumps(result.scores, ensure_ascii=False, sort_keys=True),
+                    topic_model=model,
+                    topic_updated_at=topic_updated_at,
+                )
+                updated += 1
+                breakdown[result.topic_domain] = breakdown.get(result.topic_domain, 0) + 1
+            conn.commit()
+
+        counts = conn.execute(
+            """
+            SELECT COALESCE(topic_domain, 'other') AS topic_domain, COUNT(*) AS c
+            FROM jobs
+            WHERE http_status = 200
+              AND cleaned_text IS NOT NULL
+              AND TRIM(cleaned_text) != ''
+            GROUP BY COALESCE(topic_domain, 'other')
+            ORDER BY c DESC
+            """
+        ).fetchall()
+        global_breakdown = {row["topic_domain"]: int(row["c"]) for row in counts}
+        console.print(
+            {
+                "updated": updated,
+                "batch_breakdown": breakdown,
+                "global_breakdown": global_breakdown,
+            }
+        )
+    finally:
+        conn.close()
 
 
 @app.command()
@@ -659,50 +674,53 @@ def search(
     config.setup_logging(verbose)
     conn = _open_db()
     try:
-        rows = search_mod.hybrid_search(
-            conn,
-            query=query,
-            limit=top_k,
-            country=country,
-            job_type=job_type,
-            topic_domain=topic,
-            active_only=active_only,
-            open_only=open_only,
-            rrf_k=rrf_k,
-            model_name=model,
-            keyword_weight=keyword_weight,
-            vector_weight=vector_weight,
-            semantic_only=semantic_only,
-            enable_rerank=(not no_rerank),
-            debug=debug,
-        )
-    except ImportError as exc:
-        raise typer.BadParameter(
-            "Missing vector-search dependencies. Install project dependencies first."
-        ) from exc
+        try:
+            rows = search_mod.hybrid_search(
+                conn,
+                query=query,
+                limit=top_k,
+                country=country,
+                job_type=job_type,
+                topic_domain=topic,
+                active_only=active_only,
+                open_only=open_only,
+                rrf_k=rrf_k,
+                model_name=model,
+                keyword_weight=keyword_weight,
+                vector_weight=vector_weight,
+                semantic_only=semantic_only,
+                enable_rerank=(not no_rerank),
+                debug=debug,
+            )
+        except ImportError as exc:
+            raise typer.BadParameter(
+                "Missing vector-search dependencies. Install project dependencies first."
+            ) from exc
 
-    table = Table(title=f"Hybrid Search Results ({len(rows)})")
-    table.add_column("Score", justify="right")
-    table.add_column("Title")
-    table.add_column("Org")
-    table.add_column("Country")
-    table.add_column("Type")
-    table.add_column("Topic")
-    table.add_column("Deadline")
-    table.add_column("URL")
-    for row in rows:
-        score = row.get("rrf_score")
-        table.add_row(
-            f"{float(score):.5f}" if score is not None else "-",
-            str(row.get("title") or ""),
-            str(row.get("organization") or ""),
-            str(row.get("country") or ""),
-            str(row.get("job_type_inferred") or "unknown"),
-            str(row.get("topic_domain") or topics.TOPIC_OTHER),
-            str(row.get("deadline") or ""),
-            str(row.get("url") or ""),
-        )
-    console.print(table)
+        table = Table(title=f"Hybrid Search Results ({len(rows)})")
+        table.add_column("Score", justify="right")
+        table.add_column("Title")
+        table.add_column("Org")
+        table.add_column("Country")
+        table.add_column("Type")
+        table.add_column("Topic")
+        table.add_column("Deadline")
+        table.add_column("URL")
+        for row in rows:
+            score = row.get("rrf_score")
+            table.add_row(
+                f"{float(score):.5f}" if score is not None else "-",
+                str(row.get("title") or ""),
+                str(row.get("organization") or ""),
+                str(row.get("country") or ""),
+                str(row.get("job_type_inferred") or "unknown"),
+                str(row.get("topic_domain") or topics.TOPIC_OTHER),
+                str(row.get("deadline") or ""),
+                str(row.get("url") or ""),
+            )
+        console.print(table)
+    finally:
+        conn.close()
 
 
 @app.command("eval-search")
@@ -738,47 +756,53 @@ def eval_search(
         raise typer.BadParameter("Gold query file has no valid query cases with relevance labels.")
 
     conn = _open_db()
-    baseline = _evaluate_mode(conn, cases, mode=baseline_mode, k=k)
-    candidate = _evaluate_mode(conn, cases, mode=candidate_mode, k=k)
+    try:
+        baseline = _evaluate_mode(conn, cases, mode=baseline_mode, k=k)
+        candidate = _evaluate_mode(conn, cases, mode=candidate_mode, k=k)
 
-    ndcg_gain = candidate["ndcg@k"] - baseline["ndcg@k"]
-    passed = ndcg_gain >= float(min_ndcg_gain)
-    console.print(
-        {
-            "k": k,
-            "queries": int(baseline["queries"]),
-            "baseline_mode": baseline_mode,
-            "candidate_mode": candidate_mode,
-            "baseline": baseline,
-            "candidate": candidate,
-            "ndcg_gain": ndcg_gain,
-            "min_ndcg_gain": min_ndcg_gain,
-            "pass": passed,
-        }
-    )
+        ndcg_gain = candidate["ndcg@k"] - baseline["ndcg@k"]
+        passed = ndcg_gain >= float(min_ndcg_gain)
+        console.print(
+            {
+                "k": k,
+                "queries": int(baseline["queries"]),
+                "baseline_mode": baseline_mode,
+                "candidate_mode": candidate_mode,
+                "baseline": baseline,
+                "candidate": candidate,
+                "ndcg_gain": ndcg_gain,
+                "min_ndcg_gain": min_ndcg_gain,
+                "pass": passed,
+            }
+        )
+    finally:
+        conn.close()
 
 
 @app.command()
 def stats(verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs")) -> None:
     config.setup_logging(verbose)
     conn = _open_db()
-    snapshot = db.stats_snapshot(conn)
-    idx = indexing.index_status(config.INDEX_DIR)
+    try:
+        snapshot = db.stats_snapshot(conn)
+        idx = indexing.index_status(config.INDEX_DIR)
 
-    table = Table(title="EURAXESS Scraper Stats")
-    table.add_column("Metric")
-    table.add_column("Value")
-    table.add_row("Total jobs", str(snapshot["total_jobs"]))
-    table.add_row("Queue pending", str(snapshot["queue_counts"].get("pending", 0)))
-    table.add_row("Queue done", str(snapshot["queue_counts"].get("done", 0)))
-    table.add_row("Queue failed", str(snapshot["queue_counts"].get("failed", 0)))
-    table.add_row("Delisted", str(snapshot["delisted_count"]))
-    table.add_row("Last crawl", str(snapshot["last_crawl_end"]))
-    table.add_row("Last update", str(snapshot["last_update_end"]))
-    table.add_row("FAISS exists", str(idx["faiss_exists"]))
-    table.add_row("Mapping exists", str(idx["mapping_exists"]))
-    table.add_row("Indexed vectors", str(idx["vectors"]))
-    console.print(table)
+        table = Table(title="EURAXESS Scraper Stats")
+        table.add_column("Metric")
+        table.add_column("Value")
+        table.add_row("Total jobs", str(snapshot["total_jobs"]))
+        table.add_row("Queue pending", str(snapshot["queue_counts"].get("pending", 0)))
+        table.add_row("Queue done", str(snapshot["queue_counts"].get("done", 0)))
+        table.add_row("Queue failed", str(snapshot["queue_counts"].get("failed", 0)))
+        table.add_row("Delisted", str(snapshot["delisted_count"]))
+        table.add_row("Last crawl", str(snapshot["last_crawl_end"]))
+        table.add_row("Last update", str(snapshot["last_update_end"]))
+        table.add_row("FAISS exists", str(idx["faiss_exists"]))
+        table.add_row("Mapping exists", str(idx["mapping_exists"]))
+        table.add_row("Indexed vectors", str(idx["vectors"]))
+        console.print(table)
+    finally:
+        conn.close()
 
 
 @app.command()

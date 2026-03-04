@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -10,6 +11,8 @@ import yaml
 
 from .taxonomy import normalize_for_match
 from .utils import clean_text
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TOPIC_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 TOPIC_OTHER = "other"
@@ -192,7 +195,8 @@ def classify_topic(
         if not domain_names or prototypes.shape[0] == 0:
             return TopicClassification(topic_domain=TOPIC_OTHER, confidence=0.0, scores=score_map)
         sims = np.asarray(prototypes @ query_vec, dtype="float32")
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("Topic classification failed: %s", exc)
         return TopicClassification(topic_domain=TOPIC_OTHER, confidence=0.0, scores=score_map)
 
     ranked = sorted(zip(domain_names, sims.tolist()), key=lambda item: item[1], reverse=True)
@@ -243,7 +247,8 @@ def classify_topics_batch(
         domain_names, prototypes = _prototype_matrix(model_name, topics_path)
         if not domain_names or prototypes.shape[0] == 0:
             return [TopicClassification(TOPIC_OTHER, 0.0, dict(default_scores)) for _ in items]
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("Topic batch prototype loading failed: %s", exc)
         return [TopicClassification(TOPIC_OTHER, 0.0, dict(default_scores)) for _ in items]
 
     out: list[TopicClassification] = []
@@ -253,7 +258,8 @@ def classify_topics_batch(
         if any(chunk):
             try:
                 vectors = _encode_texts(chunk, model_name)
-            except Exception:
+            except Exception as exc:
+                LOGGER.warning("Topic batch encoding failed: %s", exc)
                 vectors = None
 
         for idx, text in enumerate(chunk):

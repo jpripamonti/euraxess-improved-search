@@ -143,15 +143,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_jobs_schema_migrations(conn)
     # Backfill rows affected by older logic that persisted 304 on previously fetched jobs.
-    conn.execute(
-        """
-        UPDATE jobs
-        SET http_status = 200
-        WHERE http_status = 304
-          AND cleaned_text IS NOT NULL
-          AND TRIM(cleaned_text) != ''
-        """
-    )
+    # Guarded so it only runs once, not on every call (important for the web server).
+    if get_state(conn, "migration:304_backfill") is None:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET http_status = 200
+            WHERE http_status = 304
+              AND cleaned_text IS NOT NULL
+              AND TRIM(cleaned_text) != ''
+            """
+        )
+        set_state(conn, "migration:304_backfill", "done")
     conn.commit()
 
 

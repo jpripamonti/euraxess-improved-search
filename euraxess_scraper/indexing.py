@@ -102,9 +102,24 @@ def build_faiss_index(
     else:
         stacked = np.zeros((0, dim), dtype="float32")
 
-    faiss.write_index(index, str(index_path))
-    map_path.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
-    np.save(vectors_path, stacked)
+    # Write to temp files first, then atomically rename to prevent
+    # inconsistent state if the process crashes mid-write.
+    tmp_index = index_path.with_suffix(".index.tmp")
+    tmp_map = map_path.with_suffix(".json.tmp")
+    tmp_vectors = vectors_path.with_suffix(".npy.tmp")
+    try:
+        faiss.write_index(index, str(tmp_index))
+        tmp_map.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
+        np.save(tmp_vectors, stacked)
+        # All writes succeeded — atomically swap into place.
+        tmp_index.replace(index_path)
+        tmp_map.replace(map_path)
+        tmp_vectors.replace(vectors_path)
+    except Exception:
+        # Clean up partial temp files on failure.
+        for tmp in (tmp_index, tmp_map, tmp_vectors):
+            tmp.unlink(missing_ok=True)
+        raise
 
     LOGGER.info("Built FAISS index: %s vectors", len(mapping))
     return {
