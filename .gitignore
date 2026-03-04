@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.DS_Store
+
+# Runtime data
+/data/*.db
+/data/exports/*
+/data/index/*
+!/data/exports/.gitkeep
+!/data/index/.gitkeep

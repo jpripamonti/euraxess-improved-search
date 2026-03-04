@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "euraxess-scraper"
+version = "0.1.0"
+description = "Production-grade EURAXESS crawler with hybrid local search"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27,<1.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "lxml>=5.0,<6.0",
+    "typer>=0.12,<1.0",
+    "sentence-transformers>=3.0,<4.0",
+    "faiss-cpu>=1.8,<2.0",
+    "pyarrow>=17.0,<19.0",
+    "rich>=13.0,<14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+euraxess-scraper = "euraxess_scraper.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["euraxess_scraper"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests that hit live EURAXESS endpoints"
+]
