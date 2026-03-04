@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
 import typer
+import yaml
 from rich.console import Console
 from rich.table import Table
 
-from . import config, db, discovery, export as export_mod, indexing, search as search_mod, taxonomy
+from . import config, db, discovery, export as export_mod, indexing, search as search_mod, taxonomy, topics
 from .fetch import Fetcher, GlobalHaltError
 from .parse_job import parse_job_detail
 from .utils import now_utc_iso, robots_diagnostic
@@ -31,6 +34,105 @@ def _warn_user_agent(logger: logging.Logger) -> None:
         logger.warning(
             "USER_AGENT still contains placeholders. Update config.USER_AGENT before heavy crawling."
         )
+
+
+def _parse_gold_cases(gold_path: Path) -> list[dict[str, Any]]:
+    payload = yaml.safe_load(gold_path.read_text(encoding="utf-8")) or {}
+    if isinstance(payload, list):
+        cases = payload
+    else:
+        cases = payload.get("queries") or []
+    out: list[dict[str, Any]] = []
+    for item in cases:
+        if not isinstance(item, dict):
+            continue
+        query = str(item.get("query") or "").strip()
+        if not query:
+            continue
+        raw_rel = item.get("relevant") or {}
+        relevance: dict[str, float] = {}
+        if isinstance(raw_rel, dict):
+            for job_id, score in raw_rel.items():
+                try:
+                    relevance[str(job_id)] = float(score)
+                except (TypeError, ValueError):
+                    continue
+        elif isinstance(raw_rel, list):
+            for job_id in raw_rel:
+                relevance[str(job_id)] = 1.0
+        if not relevance:
+            continue
+        out.append(
+            {
+                "query": query,
+                "relevant": relevance,
+                "job_type": item.get("job_type"),
+                "topic": item.get("topic"),
+                "country": item.get("country"),
+                "active_only": bool(item.get("active_only", True)),
+                "open_only": bool(item.get("open_only", True)),
+            }
+        )
+    return out
+
+
+def _dcg(scores: list[float]) -> float:
+    total = 0.0
+    for idx, rel in enumerate(scores, start=1):
+        total += (2.0**float(rel) - 1.0) / math.log2(idx + 1.0)
+    return total
+
+
+def _evaluate_mode(
+    conn,
+    cases: list[dict[str, Any]],
+    *,
+    mode: str,
+    k: int,
+) -> dict[str, float]:
+    ndcgs: list[float] = []
+    mrrs: list[float] = []
+    recalls: list[float] = []
+
+    enable_rerank = mode != "hybrid_no_rerank"
+    for case in cases:
+        relevant = case["relevant"]
+        rows = search_mod.hybrid_search(
+            conn,
+            query=case["query"],
+            limit=k,
+            country=case.get("country"),
+            job_type=case.get("job_type"),
+            topic_domain=case.get("topic"),
+            active_only=case.get("active_only", True),
+            open_only=case.get("open_only", True),
+            enable_rerank=enable_rerank,
+        )
+        predicted_ids = [str(row.get("job_id")) for row in rows]
+        gains = [float(relevant.get(job_id, 0.0)) for job_id in predicted_ids[:k]]
+        ideal = sorted([float(v) for v in relevant.values()], reverse=True)[:k]
+        dcg = _dcg(gains)
+        idcg = _dcg(ideal)
+        ndcgs.append(dcg / idcg if idcg > 0.0 else 0.0)
+
+        rr = 0.0
+        for rank, job_id in enumerate(predicted_ids[:k], start=1):
+            if float(relevant.get(job_id, 0.0)) > 0.0:
+                rr = 1.0 / float(rank)
+                break
+        mrrs.append(rr)
+
+        relevant_ids = {str(job_id) for job_id in relevant.keys()}
+        hit_count = len([job_id for job_id in predicted_ids[:k] if job_id in relevant_ids])
+        recalls.append(float(hit_count) / float(len(relevant_ids)) if relevant_ids else 0.0)
+
+    denom = max(1, len(cases))
+    return {
+        "queries": float(len(cases)),
+        "ndcg@k": float(sum(ndcgs) / denom),
+        "mrr@k": float(sum(mrrs) / denom),
+        "recall@k": float(sum(recalls) / denom),
+    }
 
 
 async def _process_pending_jobs(
@@ -430,6 +532,88 @@ def reclassify(
     console.print({"updated": updated, "breakdown": breakdown})
 
 
+@app.command("classify-topics")
+def classify_topics(
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Only classify the first N jobs"),
+    only_missing: bool = typer.Option(
+        False,
+        "--only-missing/--include-classified",
+        help="Classify only jobs without a stored topic",
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Only classify jobs with last_seen_at >= this ISO timestamp",
+    ),
+    batch_size: int = typer.Option(64, "--batch-size", min=1, help="Batch size for embedding inference"),
+    model: str = typer.Option(topics.DEFAULT_TOPIC_MODEL, "--model", help="Embedding model for topic tagging"),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs"),
+) -> None:
+    config.setup_logging(verbose)
+    conn = _open_db()
+    rows = db.jobs_for_topic_classification(
+        conn,
+        limit=limit,
+        only_missing=only_missing,
+        since=since,
+    )
+    if not rows:
+        console.print({"updated": 0, "breakdown": {}})
+        return
+
+    updated = 0
+    breakdown: dict[str, int] = {}
+    topic_updated_at = now_utc_iso()
+    for start in range(0, len(rows), max(1, int(batch_size))):
+        row_chunk = rows[start : start + max(1, int(batch_size))]
+        item_chunk = [
+            {
+                "title": row["title"],
+                "cleaned_text": row["cleaned_text"],
+                "sections": db.parse_sections_json(row),
+            }
+            for row in row_chunk
+        ]
+        classified = topics.classify_topics_batch(
+            item_chunk,
+            model_name=model,
+            batch_size=batch_size,
+        )
+        for row, result in zip(row_chunk, classified):
+            db.update_job_topic_classification(
+                conn,
+                job_id=str(row["job_id"]),
+                topic_domain=result.topic_domain,
+                topic_confidence=result.confidence,
+                topic_scores_json=json.dumps(result.scores, ensure_ascii=False, sort_keys=True),
+                topic_model=model,
+                topic_updated_at=topic_updated_at,
+            )
+            updated += 1
+            breakdown[result.topic_domain] = breakdown.get(result.topic_domain, 0) + 1
+        conn.commit()
+
+    counts = conn.execute(
+        """
+        SELECT COALESCE(topic_domain, 'other') AS topic_domain, COUNT(*) AS c
+        FROM jobs
+        WHERE http_status = 200
+          AND cleaned_text IS NOT NULL
+          AND TRIM(cleaned_text) != ''
+        GROUP BY COALESCE(topic_domain, 'other')
+        ORDER BY c DESC
+        """
+    ).fetchall()
+    global_breakdown = {row["topic_domain"]: int(row["c"]) for row in counts}
+    console.print(
+        {
+            "updated": updated,
+            "batch_breakdown": breakdown,
+            "global_breakdown": global_breakdown,
+        }
+    )
+
+
 @app.command()
 def search(
     query: str = typer.Option(..., "--query", help="Search query"),
@@ -439,6 +623,11 @@ def search(
         None,
         "--job-type",
         help="Filter by type: all, postdoc, phd, professor",
+    ),
+    topic: str | None = typer.Option(
+        None,
+        "--topic",
+        help="Filter by topic: all, natural_sciences, engineering_technology, medical_health, agricultural_veterinary, social_sciences, humanities_arts, other",
     ),
     active_only: bool = typer.Option(
         True,
@@ -459,6 +648,12 @@ def search(
         "--semantic-only",
         help="Use semantic vector search only (no FTS keyword ranking)",
     ),
+    no_rerank: bool = typer.Option(
+        False,
+        "--no-rerank",
+        help="Disable reranking (baseline hybrid order only)",
+    ),
+    debug: bool = typer.Option(False, "--debug", help="Include score component diagnostics"),
     verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs"),
 ) -> None:
     config.setup_logging(verbose)
@@ -470,6 +665,7 @@ def search(
             limit=top_k,
             country=country,
             job_type=job_type,
+            topic_domain=topic,
             active_only=active_only,
             open_only=open_only,
             rrf_k=rrf_k,
@@ -477,6 +673,8 @@ def search(
             keyword_weight=keyword_weight,
             vector_weight=vector_weight,
             semantic_only=semantic_only,
+            enable_rerank=(not no_rerank),
+            debug=debug,
         )
     except ImportError as exc:
         raise typer.BadParameter(
@@ -489,6 +687,7 @@ def search(
     table.add_column("Org")
     table.add_column("Country")
     table.add_column("Type")
+    table.add_column("Topic")
     table.add_column("Deadline")
     table.add_column("URL")
     for row in rows:
@@ -499,10 +698,64 @@ def search(
             str(row.get("organization") or ""),
             str(row.get("country") or ""),
             str(row.get("job_type_inferred") or "unknown"),
+            str(row.get("topic_domain") or topics.TOPIC_OTHER),
             str(row.get("deadline") or ""),
             str(row.get("url") or ""),
         )
     console.print(table)
+
+
+@app.command("eval-search")
+def eval_search(
+    gold: Path = typer.Option(..., "--gold", exists=True, file_okay=True, dir_okay=False, readable=True),
+    k: int = typer.Option(10, "--k", min=1, max=100, help="Cutoff for ranking metrics"),
+    baseline_mode: str = typer.Option(
+        "hybrid_no_rerank",
+        "--baseline-mode",
+        help="Baseline mode: hybrid_no_rerank",
+    ),
+    candidate_mode: str = typer.Option(
+        "hybrid_rerank",
+        "--candidate-mode",
+        help="Candidate mode: hybrid_rerank",
+    ),
+    min_ndcg_gain: float = typer.Option(
+        0.05,
+        "--min-ndcg-gain",
+        help="Minimum nDCG@k gain required for pass",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs"),
+) -> None:
+    config.setup_logging(verbose)
+    valid_modes = {"hybrid_no_rerank", "hybrid_rerank"}
+    if baseline_mode not in valid_modes:
+        raise typer.BadParameter(f"Unsupported --baseline-mode {baseline_mode!r}")
+    if candidate_mode not in valid_modes:
+        raise typer.BadParameter(f"Unsupported --candidate-mode {candidate_mode!r}")
+
+    cases = _parse_gold_cases(gold)
+    if not cases:
+        raise typer.BadParameter("Gold query file has no valid query cases with relevance labels.")
+
+    conn = _open_db()
+    baseline = _evaluate_mode(conn, cases, mode=baseline_mode, k=k)
+    candidate = _evaluate_mode(conn, cases, mode=candidate_mode, k=k)
+
+    ndcg_gain = candidate["ndcg@k"] - baseline["ndcg@k"]
+    passed = ndcg_gain >= float(min_ndcg_gain)
+    console.print(
+        {
+            "k": k,
+            "queries": int(baseline["queries"]),
+            "baseline_mode": baseline_mode,
+            "candidate_mode": candidate_mode,
+            "baseline": baseline,
+            "candidate": candidate,
+            "ndcg_gain": ndcg_gain,
+            "min_ndcg_gain": min_ndcg_gain,
+            "pass": passed,
+        }
+    )
 
 
 @app.command()

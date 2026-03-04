@@ -1,0 +1,12 @@
+queries:
+  - query: "assistant professor economics"
+    job_type: professor
+    relevant:
+      "381387": 3
+      "408832": 2
+
+  - query: "postdoc quantum optics"
+    job_type: postdoc
+    relevant:
+      "379370": 3
+      "399638": 2

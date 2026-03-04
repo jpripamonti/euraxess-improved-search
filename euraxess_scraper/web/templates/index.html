@@ -62,7 +62,13 @@
     }
     .grid {
       display: grid;
-      grid-template-columns: 1.8fr 1fr 1fr;
+      grid-template-columns: 1.8fr 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .topic-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 12px;
       margin-bottom: 12px;
     }
@@ -87,6 +93,9 @@
       font: inherit;
       padding: 10px 11px;
       color: var(--ink);
+    }
+    select[multiple] {
+      min-height: 122px;
     }
     input[type="checkbox"] {
       transform: translateY(1px);
@@ -143,12 +152,43 @@
       letter-spacing: 0.5px;
       white-space: nowrap;
     }
+    .topic-pill {
+      background: #e8f3ff;
+      border: 1px solid #b3d5ff;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.75rem;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+    }
     .meta {
       color: var(--muted);
       display: flex;
       gap: 14px;
       flex-wrap: wrap;
       font-size: 0.88rem;
+    }
+    .desc-toggle {
+      margin-top: 8px;
+      border-top: 1px dashed var(--line);
+      padding-top: 8px;
+    }
+    .desc-toggle summary {
+      cursor: pointer;
+      color: #084d58;
+      font-weight: 600;
+      font-size: 0.88rem;
+      list-style: none;
+    }
+    .desc-toggle summary::-webkit-details-marker {
+      display: none;
+    }
+    .desc-toggle p {
+      margin: 8px 0 0;
+      font-size: 0.9rem;
+      color: #1f2937;
+      white-space: pre-wrap;
+      line-height: 1.38;
     }
     .empty {
       border-radius: 14px;
@@ -174,7 +214,7 @@
       font-weight: 600;
     }
     @media (max-width: 900px) {
-      .grid, .grid-bottom { grid-template-columns: 1fr; }
+      .grid, .grid-bottom, .topic-grid { grid-template-columns: 1fr; }
       .title-row { flex-direction: column; }
       .type-pill { align-self: flex-start; }
       .hero h1 { font-size: 1.6rem; }
@@ -207,6 +247,26 @@
             <label for="country">Country (optional)</label>
             <input id="country" name="country" type="text" value="{{ country }}" placeholder="Germany" />
           </div>
+          <div></div>
+        </div>
+
+        <div class="topic-grid">
+          <div>
+            <label for="include_topic">Include topics (multi-select)</label>
+            <select id="include_topic" name="include_topic" multiple>
+              {% for value, label in topic_filter_labels.items() %}
+              <option value="{{ value }}" {% if value in include_topics %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="exclude_topic">Exclude topics (multi-select)</label>
+            <select id="exclude_topic" name="exclude_topic" multiple>
+              {% for value, label in topic_filter_labels.items() %}
+              <option value="{{ value }}" {% if value in exclude_topics %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
         </div>
 
         <div class="grid-bottom">
@@ -221,20 +281,36 @@
     <p class="summary">
       Showing {{ payload.results | length }} of {{ payload.total }} result(s).
       {% if payload.job_type != "all" %} Strict filter: <strong>{{ payload.job_type }}</strong>.{% endif %}
+      {% if include_topics %}
+      Included topics: <strong>{% for value in include_topics %}{{ topic_labels.get(value, value) }}{% if not loop.last %}, {% endif %}{% endfor %}</strong>.
+      {% endif %}
+      {% if exclude_topics %}
+      Excluded topics: <strong>{% for value in exclude_topics %}{{ topic_labels.get(value, value) }}{% if not loop.last %}, {% endif %}{% endfor %}</strong>.
+      {% endif %}
     </p>
 
     {% if payload.results %}
       {% for row in payload.results %}
       <article class="result">
         <div class="title-row">
-          <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.title }}</a>
-          <span class="type-pill">{{ row.job_type_inferred or "unknown" }}</span>
+          <a href="{{ row.detail_url }}">{{ row.title }}</a>
+          <span>
+            <span class="type-pill">{{ row.job_type_inferred or "unknown" }}</span>
+            <span class="topic-pill">{{ topic_labels.get(row.topic_domain or "other", row.topic_domain or "other") }}</span>
+          </span>
         </div>
         <div class="meta">
           <span>{{ row.organization or "Unknown organization" }}</span>
           <span>{{ row.country or "Country n/a" }}</span>
           <span>Deadline: {{ row.deadline or "n/a" }}</span>
+          {% if row.topic_confidence is not none %}
+          <span>Topic confidence: {{ "%.2f"|format(row.topic_confidence) }}</span>
+          {% endif %}
         </div>
+        <details class="desc-toggle">
+          <summary>Show description</summary>
+          <p>{{ row.description_preview or "No description available for this result." }}</p>
+        </details>
       </article>
       {% endfor %}
     {% else %}

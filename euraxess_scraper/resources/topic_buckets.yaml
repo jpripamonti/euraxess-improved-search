@@ -1,0 +1,71 @@
+topic_domains:
+  natural_sciences:
+    label: Natural Sciences
+    description: Physics, chemistry, mathematics, astronomy, earth and environmental sciences.
+    seed_terms:
+      - physics
+      - chemistry
+      - mathematics
+      - astronomy
+      - geoscience
+      - climate science
+      - environmental science
+  engineering_technology:
+    label: Engineering & Technology
+    description: Computer science, engineering, robotics, AI, materials, and applied technology.
+    seed_terms:
+      - engineering
+      - computer science
+      - machine learning
+      - robotics
+      - data science
+      - materials science
+      - information technology
+  medical_health:
+    label: Medical & Health
+    description: Biomedical, clinical, public health, pharmacy, neuroscience, and life-science health research.
+    seed_terms:
+      - medicine
+      - public health
+      - biomedical
+      - clinical
+      - pharmacy
+      - neuroscience
+      - epidemiology
+  agricultural_veterinary:
+    label: Agricultural & Veterinary
+    description: Agriculture, food systems, veterinary science, forestry, fisheries, and animal science.
+    seed_terms:
+      - agriculture
+      - veterinary
+      - agronomy
+      - food science
+      - forestry
+      - fisheries
+      - animal science
+  social_sciences:
+    label: Social Sciences
+    description: Economics, sociology, political science, law, psychology, education, and human geography.
+    seed_terms:
+      - economics
+      - sociology
+      - political science
+      - law
+      - psychology
+      - education
+      - human geography
+  humanities_arts:
+    label: Humanities & Arts
+    description: History, philosophy, languages, literature, media, performing arts, and cultural studies.
+    seed_terms:
+      - history
+      - philosophy
+      - literature
+      - linguistics
+      - arts
+      - music
+      - cultural studies
+  other:
+    label: Other
+    description: Fallback when no broad domain has sufficient confidence.
+    seed_terms: []

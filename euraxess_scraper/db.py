@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,11 @@ JOB_COLUMNS = [
     "position_type",
     "job_type_inferred",
     "job_type_score",
+    "topic_domain",
+    "topic_confidence",
+    "topic_scores_json",
+    "topic_model",
+    "topic_updated_at",
     "contract_type",
     "hours",
     "salary",
@@ -50,6 +56,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     position_type TEXT,
     job_type_inferred TEXT,
     job_type_score INTEGER,
+    topic_domain TEXT,
+    topic_confidence REAL,
+    topic_scores_json TEXT,
+    topic_model TEXT,
+    topic_updated_at TEXT,
     contract_type TEXT,
     hours        TEXT,
     salary       TEXT,
@@ -99,13 +110,33 @@ def _jobs_table_columns(conn: sqlite3.Connection) -> set[str]:
     return {row["name"] for row in rows}
 
 
+def _safe_add_column(conn: sqlite3.Connection, table: str, column_name: str, column_type: str) -> None:
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+    except sqlite3.OperationalError as exc:
+        # Handle concurrent startup races (duplicate column) gracefully.
+        if "duplicate column name" not in str(exc).lower():
+            raise
+
+
 def _ensure_jobs_schema_migrations(conn: sqlite3.Connection) -> None:
     columns = _jobs_table_columns(conn)
     if "job_type_inferred" not in columns:
-        conn.execute("ALTER TABLE jobs ADD COLUMN job_type_inferred TEXT")
+        _safe_add_column(conn, "jobs", "job_type_inferred", "TEXT")
     if "job_type_score" not in columns:
-        conn.execute("ALTER TABLE jobs ADD COLUMN job_type_score INTEGER")
+        _safe_add_column(conn, "jobs", "job_type_score", "INTEGER")
+    if "topic_domain" not in columns:
+        _safe_add_column(conn, "jobs", "topic_domain", "TEXT")
+    if "topic_confidence" not in columns:
+        _safe_add_column(conn, "jobs", "topic_confidence", "REAL")
+    if "topic_scores_json" not in columns:
+        _safe_add_column(conn, "jobs", "topic_scores_json", "TEXT")
+    if "topic_model" not in columns:
+        _safe_add_column(conn, "jobs", "topic_model", "TEXT")
+    if "topic_updated_at" not in columns:
+        _safe_add_column(conn, "jobs", "topic_updated_at", "TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type_inferred ON jobs(job_type_inferred)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_topic_domain ON jobs(topic_domain)")
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -304,6 +335,42 @@ def get_job_row(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
 
 
+def get_job_detail(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT *
+        FROM jobs
+        WHERE job_id = ?
+          AND http_status = 200
+          AND cleaned_text IS NOT NULL
+          AND TRIM(cleaned_text) != ''
+        """,
+        (job_id,),
+    ).fetchone()
+
+
+def parse_sections_json(value: sqlite3.Row | dict[str, Any] | str | None) -> dict[str, str]:
+    raw = value
+    if isinstance(value, sqlite3.Row):
+        raw = value["sections_json"]
+    elif isinstance(value, dict):
+        raw = value.get("sections_json")
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, text in payload.items():
+        if not isinstance(key, str):
+            continue
+        out[key] = str(text or "").strip()
+    return out
+
+
 def jobs_for_reclassification(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
     sql = """
         SELECT job_id, title, researcher_profile, cleaned_text
@@ -320,6 +387,38 @@ def jobs_for_reclassification(conn: sqlite3.Connection, limit: int | None = None
     return conn.execute(sql, params).fetchall()
 
 
+def jobs_for_topic_classification(
+    conn: sqlite3.Connection,
+    *,
+    limit: int | None = None,
+    only_missing: bool = False,
+    since: str | None = None,
+) -> list[sqlite3.Row]:
+    clauses = [
+        "http_status = 200",
+        "cleaned_text IS NOT NULL",
+        "TRIM(cleaned_text) != ''",
+    ]
+    params: list[Any] = []
+    if only_missing:
+        clauses.append("(topic_domain IS NULL OR TRIM(topic_domain) = '')")
+    if since:
+        clauses.append("last_seen_at >= ?")
+        params.append(since)
+
+    where_sql = " AND ".join(clauses)
+    sql = f"""
+        SELECT job_id, title, cleaned_text, sections_json
+        FROM jobs
+        WHERE {where_sql}
+        ORDER BY job_id
+    """
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return conn.execute(sql, tuple(params)).fetchall()
+
+
 def update_job_type_classification(
     conn: sqlite3.Connection,
     *,
@@ -334,6 +433,37 @@ def update_job_type_classification(
         WHERE job_id = ?
         """,
         (job_type_inferred, int(job_type_score), job_id),
+    )
+
+
+def update_job_topic_classification(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    topic_domain: str,
+    topic_confidence: float,
+    topic_scores_json: str,
+    topic_model: str,
+    topic_updated_at: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE jobs
+        SET topic_domain = ?,
+            topic_confidence = ?,
+            topic_scores_json = ?,
+            topic_model = ?,
+            topic_updated_at = ?
+        WHERE job_id = ?
+        """,
+        (
+            topic_domain,
+            float(topic_confidence),
+            topic_scores_json,
+            topic_model,
+            topic_updated_at,
+            job_id,
+        ),
     )
 
 

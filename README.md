@@ -15,8 +15,12 @@ Production-grade crawler and local hybrid-search pipeline for EURAXESS job offer
 - Deduplication by canonical EURAXESS job ID (`/jobs/<numeric_id>`)
 - Delisting tracking (`delisted_at`, no hard deletes)
 - Inferred strict role taxonomy (`postdoc`, `phd`, `professor`, `unknown`)
+- In-app job detail pages backed by parsed local content
+- AI topic classification with broad domains (`natural_sciences`, `engineering_technology`, `medical_health`, `agricultural_veterinary`, `social_sciences`, `humanities_arts`, `other`)
 - Export to JSONL and Parquet
 - Weighted hybrid keyword + semantic search using Reciprocal Rank Fusion (RRF)
+- Deterministic reranking layer for improved relevance
+- Search evaluation command with `nDCG/MRR/Recall` on gold queries
 - FastAPI web UI + JSON API for local/self-hosted search
 
 ## Project Layout
@@ -26,11 +30,13 @@ Production-grade crawler and local hybrid-search pipeline for EURAXESS job offer
 - `euraxess_scraper/fetch.py`: async HTTP fetcher, retry/backoff, global halt guard
 - `euraxess_scraper/parse_job.py`: detail page parser
 - `euraxess_scraper/taxonomy.py`: role inference + synonym expansion
+- `euraxess_scraper/topics.py`: topic-domain inference + labels
 - `euraxess_scraper/db.py`: schema + DB helpers
 - `euraxess_scraper/indexing.py`: FTS5 + FAISS build
 - `euraxess_scraper/search.py`: hybrid retrieval and RRF merge
 - `euraxess_scraper/export.py`: JSONL / Parquet export
 - `euraxess_scraper/web/`: FastAPI app + Jinja templates
+- `euraxess_scraper/resources/topic_buckets.yaml`: topic-domain taxonomy config
 - `scripts/scheduled_update.sh`: incremental refresh for cron/launchd
 - `tests/`: unit + integration tests
 
@@ -103,8 +109,10 @@ python -m euraxess_scraper.cli build-index --model all-MiniLM-L6-v2 --batch-size
 python -m euraxess_scraper.cli search --query "machine learning postdoc germany" --top-k 10
 python -m euraxess_scraper.cli search --query "data science" --country Germany
 python -m euraxess_scraper.cli search --query "quantum optics" --job-type postdoc
+python -m euraxess_scraper.cli search --query "sociology phd" --topic social_sciences
 python -m euraxess_scraper.cli search --query "computational biology" --vector-weight 3.0 --keyword-weight 1.0
 python -m euraxess_scraper.cli search --query "bioinformatics phd" --semantic-only
+python -m euraxess_scraper.cli search --query "assistant professor economics" --no-rerank
 ```
 
 ### 6) Reclassify role taxonomy
@@ -113,7 +121,21 @@ python -m euraxess_scraper.cli search --query "bioinformatics phd" --semantic-on
 python -m euraxess_scraper.cli reclassify
 ```
 
-### 7) Web app (FastAPI)
+### 7) Classify topic domains
+
+```bash
+python -m euraxess_scraper.cli classify-topics --only-missing
+python -m euraxess_scraper.cli classify-topics --since 2026-03-01T00:00:00Z
+```
+
+### 8) Evaluate search quality
+
+```bash
+python -m euraxess_scraper.cli eval-search --gold tests/fixtures/gold_queries.yaml
+python -m euraxess_scraper.cli eval-search --gold tests/fixtures/gold_queries.yaml --min-ndcg-gain 0.05
+```
+
+### 9) Web app (FastAPI)
 
 ```bash
 python -m euraxess_scraper.cli serve --host 127.0.0.1 --port 8000
@@ -123,16 +145,18 @@ Then open `http://127.0.0.1:8000`.
 
 Available web endpoints:
 - `GET /`: search UI
-- `GET /search`: HTML results endpoint
-- `GET /api/search`: JSON API (`q`, `job_type`, `country`, `page`, `page_size`, `active_only`, `open_only`)
+- `GET /search`: HTML results endpoint (`q`, `job_type`, `topic`, `country`, `page`, `page_size`, `active_only`, `open_only`, `debug`)
+- `GET /jobs/{job_id}`: local detail page for a single job
+- `GET /api/search`: JSON API (`q`, `job_type`, `topic`, `country`, `page`, `page_size`, `active_only`, `open_only`, `debug`)
+- `GET /api/jobs/{job_id}`: JSON detail payload for one job
 
-### 8) Stats
+### 10) Stats
 
 ```bash
 python -m euraxess_scraper.cli stats
 ```
 
-### 9) Recurring incremental updates (every few days)
+### 11) Recurring incremental updates (every few days)
 
 Run manually:
 
@@ -152,6 +176,7 @@ Example cron entry (every 3 days at 06:00 local time):
 - Exports: `data/exports/`
 - Vector index: `data/index/faiss.index`
 - Vector mapping: `data/index/faiss_mapping.json`
+- Vector matrix: `data/index/vectors.npy`
 
 ## Rate Limiting / Politeness
 

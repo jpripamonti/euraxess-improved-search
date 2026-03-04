@@ -15,6 +15,7 @@ python -m euraxess_scraper.cli update \
   --rps "${RPS}" \
   --concurrency "${CONCURRENCY}"
 
+python -m euraxess_scraper.cli classify-topics --only-missing
 python -m euraxess_scraper.cli build-index
 python -m euraxess_scraper.cli export --format parquet --output data/exports/jobs.parquet
 python -m euraxess_scraper.cli stats
