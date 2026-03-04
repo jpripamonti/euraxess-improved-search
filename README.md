@@ -14,19 +14,23 @@ Production-grade crawler and local hybrid-search pipeline for EURAXESS job offer
 - Resilient discovery retries with explicit partial-scan detection
 - Deduplication by canonical EURAXESS job ID (`/jobs/<numeric_id>`)
 - Delisting tracking (`delisted_at`, no hard deletes)
+- Inferred strict role taxonomy (`postdoc`, `phd`, `professor`, `unknown`)
 - Export to JSONL and Parquet
 - Weighted hybrid keyword + semantic search using Reciprocal Rank Fusion (RRF)
+- FastAPI web UI + JSON API for local/self-hosted search
 
 ## Project Layout
 
-- `euraxess_scraper/cli.py`: Typer commands (`crawl`, `update`, `export`, `build-index`, `search`, `stats`)
+- `euraxess_scraper/cli.py`: Typer commands (`crawl`, `update`, `export`, `build-index`, `reclassify`, `search`, `stats`, `serve`)
 - `euraxess_scraper/discovery.py`: listing pagination + lightweight endpoint probe
 - `euraxess_scraper/fetch.py`: async HTTP fetcher, retry/backoff, global halt guard
 - `euraxess_scraper/parse_job.py`: detail page parser
+- `euraxess_scraper/taxonomy.py`: role inference + synonym expansion
 - `euraxess_scraper/db.py`: schema + DB helpers
 - `euraxess_scraper/indexing.py`: FTS5 + FAISS build
 - `euraxess_scraper/search.py`: hybrid retrieval and RRF merge
 - `euraxess_scraper/export.py`: JSONL / Parquet export
+- `euraxess_scraper/web/`: FastAPI app + Jinja templates
 - `scripts/scheduled_update.sh`: incremental refresh for cron/launchd
 - `tests/`: unit + integration tests
 
@@ -98,17 +102,37 @@ python -m euraxess_scraper.cli build-index --model all-MiniLM-L6-v2 --batch-size
 ```bash
 python -m euraxess_scraper.cli search --query "machine learning postdoc germany" --top-k 10
 python -m euraxess_scraper.cli search --query "data science" --country Germany
+python -m euraxess_scraper.cli search --query "quantum optics" --job-type postdoc
 python -m euraxess_scraper.cli search --query "computational biology" --vector-weight 3.0 --keyword-weight 1.0
 python -m euraxess_scraper.cli search --query "bioinformatics phd" --semantic-only
 ```
 
-### 6) Stats
+### 6) Reclassify role taxonomy
+
+```bash
+python -m euraxess_scraper.cli reclassify
+```
+
+### 7) Web app (FastAPI)
+
+```bash
+python -m euraxess_scraper.cli serve --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000`.
+
+Available web endpoints:
+- `GET /`: search UI
+- `GET /search`: HTML results endpoint
+- `GET /api/search`: JSON API (`q`, `job_type`, `country`, `page`, `page_size`, `active_only`, `open_only`)
+
+### 8) Stats
 
 ```bash
 python -m euraxess_scraper.cli stats
 ```
 
-### 7) Recurring incremental updates (every few days)
+### 9) Recurring incremental updates (every few days)
 
 Run manually:
 

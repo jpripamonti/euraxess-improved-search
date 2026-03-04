@@ -1,4 +1,4 @@
-.PHONY: test integration crawl update update-recent build-index export stats sync-recent sync-full
+.PHONY: test integration crawl update update-recent build-index export stats sync-recent sync-full reclassify serve
 
 test:
 	pytest
@@ -17,6 +17,12 @@ update-recent:
 
 build-index:
 	python -m euraxess_scraper.cli build-index
+
+reclassify:
+	python -m euraxess_scraper.cli reclassify
+
+serve:
+	python -m euraxess_scraper.cli serve --host 127.0.0.1 --port 8000
 
 export:
 	python -m euraxess_scraper.cli export --format parquet --output data/exports/jobs.parquet

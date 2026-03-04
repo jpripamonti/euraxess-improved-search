@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import config, db, discovery, export as export_mod, indexing, search as search_mod
+from . import config, db, discovery, export as export_mod, indexing, search as search_mod, taxonomy
 from .fetch import Fetcher, GlobalHaltError
 from .parse_job import parse_job_detail
 from .utils import now_utc_iso, robots_diagnostic
@@ -391,10 +391,65 @@ def build_index(
 
 
 @app.command()
+def reclassify(
+    limit: int | None = typer.Option(None, "--limit", min=1, help="Only reclassify the first N jobs"),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable debug logs"),
+) -> None:
+    config.setup_logging(verbose)
+    conn = _open_db()
+
+    rows = db.jobs_for_reclassification(conn, limit=limit)
+    updated = 0
+    for row in rows:
+        classification = taxonomy.classify_job_type(
+            title=row["title"],
+            researcher_profile=row["researcher_profile"],
+            cleaned_text=row["cleaned_text"],
+        )
+        db.update_job_type_classification(
+            conn,
+            job_id=row["job_id"],
+            job_type_inferred=classification.job_type,
+            job_type_score=classification.score,
+        )
+        updated += 1
+    conn.commit()
+
+    counts = conn.execute(
+        """
+        SELECT COALESCE(job_type_inferred, 'unknown') AS job_type, COUNT(*) AS c
+        FROM jobs
+        WHERE http_status = 200
+          AND cleaned_text IS NOT NULL
+          AND TRIM(cleaned_text) != ''
+        GROUP BY COALESCE(job_type_inferred, 'unknown')
+        ORDER BY c DESC
+        """
+    ).fetchall()
+    breakdown = {row["job_type"]: int(row["c"]) for row in counts}
+    console.print({"updated": updated, "breakdown": breakdown})
+
+
+@app.command()
 def search(
     query: str = typer.Option(..., "--query", help="Search query"),
     top_k: int = typer.Option(10, "--top-k", help="Top K results"),
     country: str | None = typer.Option(None, "--country", help="Country filter"),
+    job_type: str | None = typer.Option(
+        None,
+        "--job-type",
+        help="Filter by type: all, postdoc, phd, professor",
+    ),
+    active_only: bool = typer.Option(
+        True,
+        "--active-only/--include-delisted",
+        help="Exclude delisted positions by default",
+    ),
+    open_only: bool = typer.Option(
+        True,
+        "--open-only/--include-closed",
+        help="Exclude positions with past deadlines by default",
+    ),
     rrf_k: int = typer.Option(config.RRF_K, "--rrf-k", help="RRF constant"),
     model: str = typer.Option(config.EMBEDDING_MODEL, "--model", help="Embedding model for semantic search"),
     keyword_weight: float = typer.Option(1.0, "--keyword-weight", help="Weight for keyword (FTS) ranking"),
@@ -412,8 +467,11 @@ def search(
         rows = search_mod.hybrid_search(
             conn,
             query=query,
-            top_k=top_k,
+            limit=top_k,
             country=country,
+            job_type=job_type,
+            active_only=active_only,
+            open_only=open_only,
             rrf_k=rrf_k,
             model_name=model,
             keyword_weight=keyword_weight,
@@ -430,14 +488,17 @@ def search(
     table.add_column("Title")
     table.add_column("Org")
     table.add_column("Country")
+    table.add_column("Type")
     table.add_column("Deadline")
     table.add_column("URL")
     for row in rows:
+        score = row.get("rrf_score")
         table.add_row(
-            f"{row['rrf_score']:.5f}",
+            f"{float(score):.5f}" if score is not None else "-",
             str(row.get("title") or ""),
             str(row.get("organization") or ""),
             str(row.get("country") or ""),
+            str(row.get("job_type_inferred") or "unknown"),
             str(row.get("deadline") or ""),
             str(row.get("url") or ""),
         )
@@ -465,6 +526,28 @@ def stats(verbose: bool = typer.Option(False, "--verbose", help="Enable debug lo
     table.add_row("Mapping exists", str(idx["mapping_exists"]))
     table.add_row("Indexed vectors", str(idx["vectors"]))
     console.print(table)
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host interface"),
+    port: int = typer.Option(8000, "--port", help="TCP port"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload (dev only)"),
+) -> None:
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise typer.BadParameter(
+            "Missing web dependencies. Install project dependencies first."
+        ) from exc
+
+    uvicorn.run(
+        "euraxess_scraper.web.app:create_app",
+        host=host,
+        port=port,
+        reload=reload,
+        factory=True,
+    )
 
 
 if __name__ == "__main__":

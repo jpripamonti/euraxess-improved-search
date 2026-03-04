@@ -1,0 +1,34 @@
+job_types:
+  postdoc:
+    - postdoc
+    - post doc
+    - post-doc
+    - postdoctoral
+    - post doctoral
+    - post-doctoral
+    - postdoctoral researcher
+    - postdoctoral fellow
+    - postdoctoral position
+    - postdoctoral research associate
+  phd:
+    - phd
+    - ph d
+    - ph.d
+    - doctoral
+    - doctoral candidate
+    - doctoral student
+    - phd candidate
+    - phd student
+    - predoctoral
+    - pre-doctoral
+    - pre doctoral
+  professor:
+    - professor
+    - assistant professor
+    - associate professor
+    - full professor
+    - tenure track
+    - tenure-track
+    - faculty position
+    - faculty member
+

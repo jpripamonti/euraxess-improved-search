@@ -17,6 +17,8 @@ JOB_COLUMNS = [
     "deadline",
     "researcher_profile",
     "position_type",
+    "job_type_inferred",
+    "job_type_score",
     "contract_type",
     "hours",
     "salary",
@@ -46,6 +48,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     deadline     TEXT,
     researcher_profile TEXT,
     position_type TEXT,
+    job_type_inferred TEXT,
+    job_type_score INTEGER,
     contract_type TEXT,
     hours        TEXT,
     salary       TEXT,
@@ -90,8 +94,23 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+def _jobs_table_columns(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("PRAGMA table_info(jobs)").fetchall()
+    return {row["name"] for row in rows}
+
+
+def _ensure_jobs_schema_migrations(conn: sqlite3.Connection) -> None:
+    columns = _jobs_table_columns(conn)
+    if "job_type_inferred" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN job_type_inferred TEXT")
+    if "job_type_score" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN job_type_score INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type_inferred ON jobs(job_type_inferred)")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    _ensure_jobs_schema_migrations(conn)
     # Backfill rows affected by older logic that persisted 304 on previously fetched jobs.
     conn.execute(
         """
@@ -283,6 +302,39 @@ def get_active_job_ids(conn: sqlite3.Connection) -> set[str]:
 
 def get_job_row(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+
+
+def jobs_for_reclassification(conn: sqlite3.Connection, limit: int | None = None) -> list[sqlite3.Row]:
+    sql = """
+        SELECT job_id, title, researcher_profile, cleaned_text
+        FROM jobs
+        WHERE http_status = 200
+          AND cleaned_text IS NOT NULL
+          AND TRIM(cleaned_text) != ''
+        ORDER BY job_id
+    """
+    params: tuple[Any, ...] = ()
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = (limit,)
+    return conn.execute(sql, params).fetchall()
+
+
+def update_job_type_classification(
+    conn: sqlite3.Connection,
+    *,
+    job_id: str,
+    job_type_inferred: str,
+    job_type_score: int,
+) -> None:
+    conn.execute(
+        """
+        UPDATE jobs
+        SET job_type_inferred = ?, job_type_score = ?
+        WHERE job_id = ?
+        """,
+        (job_type_inferred, int(job_type_score), job_id),
+    )
 
 
 def jobs_for_export(conn: sqlite3.Connection) -> list[sqlite3.Row]:

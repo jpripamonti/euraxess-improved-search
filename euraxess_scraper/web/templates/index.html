@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EURAXESS Role Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe4;
+      --ink: #111827;
+      --card: #fefaf2;
+      --muted: #55626d;
+      --accent: #0b7285;
+      --accent-soft: #d8eef2;
+      --line: #d7d2c7;
+      --pill: #ffe08a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 15%, #f8d8a533 0, transparent 45%),
+        radial-gradient(circle at 93% 78%, #6aa6b833 0, transparent 40%),
+        var(--bg);
+    }
+    .wrap {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 24px 18px 42px;
+    }
+    .hero {
+      border: 1px solid var(--line);
+      background: linear-gradient(120deg, #fff9eb, #eff8fa 58%, #fffef9);
+      border-radius: 22px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 9px 30px #5a6f7a1a;
+    }
+    .hero h1 {
+      margin: 0;
+      font-family: "Fraunces", serif;
+      font-size: 2rem;
+      line-height: 1.08;
+      letter-spacing: 0.3px;
+    }
+    .hero p {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    .search-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.8fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .grid-bottom {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 12px;
+      align-items: center;
+    }
+    label {
+      display: block;
+      font-size: 0.84rem;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    input[type="text"], select {
+      width: 100%;
+      border: 1px solid #c9c3b6;
+      background: #fff;
+      border-radius: 11px;
+      font: inherit;
+      padding: 10px 11px;
+      color: var(--ink);
+    }
+    input[type="checkbox"] {
+      transform: translateY(1px);
+      margin-right: 6px;
+      accent-color: var(--accent);
+    }
+    .btn {
+      border: 0;
+      border-radius: 11px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(130deg, #0b7285, #2b8f9f);
+    }
+    .summary {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .result {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 5px;
+    }
+    .title-row a {
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .title-row a:hover {
+      text-decoration: underline;
+      text-decoration-color: var(--accent);
+      text-underline-offset: 2px;
+    }
+    .type-pill {
+      background: var(--pill);
+      border: 1px solid #e5c564;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    .meta {
+      color: var(--muted);
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.88rem;
+    }
+    .empty {
+      border-radius: 14px;
+      background: var(--accent-soft);
+      border: 1px solid #b9dce2;
+      padding: 15px;
+      color: #084d58;
+      margin-top: 8px;
+    }
+    .pager {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .pager a {
+      text-decoration: none;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      border-radius: 9px;
+      padding: 8px 11px;
+      font-weight: 600;
+    }
+    @media (max-width: 900px) {
+      .grid, .grid-bottom { grid-template-columns: 1fr; }
+      .title-row { flex-direction: column; }
+      .type-pill { align-self: flex-start; }
+      .hero h1 { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>EURAXESS Role Finder</h1>
+      <p>Hybrid search with strict role filters for Postdoc, PhD, and Professor openings.</p>
+    </section>
+
+    <section class="search-card">
+      <form method="get" action="{{ request.url_for('search_page') }}">
+        <div class="grid">
+          <div>
+            <label for="q">Search</label>
+            <input id="q" name="q" type="text" placeholder="e.g. computational biology postdoc" value="{{ q }}" />
+          </div>
+          <div>
+            <label for="job_type">Role type</label>
+            <select id="job_type" name="job_type">
+              {% for value, label in type_labels.items() %}
+              <option value="{{ value }}" {% if job_type == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="country">Country (optional)</label>
+            <input id="country" name="country" type="text" value="{{ country }}" placeholder="Germany" />
+          </div>
+        </div>
+
+        <div class="grid-bottom">
+          <label><input type="checkbox" name="active_only" value="true" {% if active_only %}checked{% endif %}> Active only</label>
+          <label><input type="checkbox" name="open_only" value="true" {% if open_only %}checked{% endif %}> Open deadlines</label>
+          <div></div>
+          <button class="btn" type="submit">Search Jobs</button>
+        </div>
+      </form>
+    </section>
+
+    <p class="summary">
+      Showing {{ payload.results | length }} of {{ payload.total }} result(s).
+      {% if payload.job_type != "all" %} Strict filter: <strong>{{ payload.job_type }}</strong>.{% endif %}
+    </p>
+
+    {% if payload.results %}
+      {% for row in payload.results %}
+      <article class="result">
+        <div class="title-row">
+          <a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.title }}</a>
+          <span class="type-pill">{{ row.job_type_inferred or "unknown" }}</span>
+        </div>
+        <div class="meta">
+          <span>{{ row.organization or "Unknown organization" }}</span>
+          <span>{{ row.country or "Country n/a" }}</span>
+          <span>Deadline: {{ row.deadline or "n/a" }}</span>
+        </div>
+      </article>
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        No matches found for this strict combination of filters. Try removing the country or switching role type.
+      </div>
+    {% endif %}
+
+    <div class="pager">
+      <div>
+        {% if prev_url %}
+        <a href="{{ prev_url }}">
+          Previous
+        </a>
+        {% endif %}
+      </div>
+      <div>
+        {% if next_url %}
+        <a href="{{ next_url }}">
+          Next
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

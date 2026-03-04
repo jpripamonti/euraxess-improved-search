@@ -13,6 +13,8 @@ def test_parse_job_fixture_extracts_expected_fields():
     assert record["position_type"] == "job_offer"
     assert record["title"]
     assert record["organization"]
+    assert record["job_type_inferred"] in {"postdoc", "phd", "professor", "unknown"}
+    assert isinstance(record["job_type_score"], int)
     assert isinstance(record["sections_json"], str)
     assert record["cleaned_text"]
     assert record["content_hash"]

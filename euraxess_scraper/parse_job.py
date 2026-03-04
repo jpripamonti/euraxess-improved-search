@@ -6,6 +6,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup, Tag
 
+from .taxonomy import classify_job_type
 from .utils import clean_text, extract_job_id, parse_date_to_utc_iso, sha256_text
 
 SECTION_IDS = {
@@ -113,6 +114,11 @@ def parse_job_detail(html: str, url: str) -> dict[str, Any]:
 
     cleaned_chunks = [v for v in sections.values() if v]
     cleaned_text = clean_text("\n\n".join(cleaned_chunks))
+    inferred = classify_job_type(
+        title=title,
+        researcher_profile=info_map.get("researcher profile"),
+        cleaned_text=cleaned_text,
+    )
 
     position_type = "job_offer"
     salary = info_map.get("salary") or info_map.get("offered salary")
@@ -128,6 +134,8 @@ def parse_job_detail(html: str, url: str) -> dict[str, Any]:
         "deadline": deadline_iso,
         "researcher_profile": info_map.get("researcher profile"),
         "position_type": position_type,
+        "job_type_inferred": inferred.job_type,
+        "job_type_score": inferred.score,
         "contract_type": info_map.get("type of contract"),
         "hours": info_map.get("job status") or info_map.get("hours per week"),
         "salary": salary,
