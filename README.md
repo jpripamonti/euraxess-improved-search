@@ -241,9 +241,53 @@ python -m euraxess_scraper.cli export --format jsonl --output data/exports/jobs.
 python -m euraxess_scraper.cli export --format parquet --output data/exports/jobs.parquet
 ```
 
-### 12. Recurring updates (cron / launchd)
+### 12. Automated daily updates (GitHub Actions)
 
-Run manually:
+The included workflow (`.github/workflows/daily-update.yml`) keeps the database fresh automatically — no server required.
+
+**Schedule:**
+- **Mon–Sat 04:00 UTC** — fast incremental update (first 30 listing pages, new jobs only)
+- **Sunday 03:00 UTC** — full scan with delisting check
+
+The database and search index are stored as assets on a rolling GitHub Release (`db-latest`) and replaced on every run.
+
+#### First-time setup
+
+1. Push the repo to GitHub (see [Renaming / pushing](#renaming--pushing) below)
+2. Upload your existing database to the `db-latest` release:
+
+```bash
+gh release create db-latest \
+  data/euraxess.db \
+  data/index/faiss.index \
+  data/index/faiss_mapping.json \
+  data/index/vectors.npy \
+  --title "Database: initial" \
+  --notes "Initial database upload" \
+  --prerelease
+```
+
+3. GitHub Actions will take it from there — downloading, updating, and re-uploading on schedule.
+
+> **No secrets needed.** The workflow uses the built-in `GITHUB_TOKEN` which has the required `contents: write` permission.
+
+#### Manual trigger
+
+Go to **Actions → Daily EURAXESS Update → Run workflow** to trigger a run at any time.
+
+#### Download the latest database locally
+
+```bash
+gh release download db-latest \
+  --repo <your-username>/<your-repo> \
+  --dir data/tmp/
+mv data/tmp/euraxess.db data/
+mv data/tmp/faiss.index data/tmp/faiss_mapping.json data/tmp/vectors.npy data/index/
+```
+
+### 13. Recurring updates (local cron / launchd)
+
+If you prefer to run updates on your own machine:
 
 ```bash
 ./scripts/scheduled_update.sh

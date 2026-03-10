@@ -9,13 +9,24 @@ MAX_PAGES="${MAX_PAGES:-30}"
 RPS="${RPS:-0.4}"
 CONCURRENCY="${CONCURRENCY:-2}"
 
+echo "[1/6] Updating jobs (max ${MAX_PAGES} pages)..."
 python -m euraxess_scraper.cli update \
   --max-pages "${MAX_PAGES}" \
   --no-delist \
   --rps "${RPS}" \
   --concurrency "${CONCURRENCY}"
 
+echo "[2/6] Classifying roles..."
+python -m euraxess_scraper.cli reclassify
+
+echo "[3/6] Classifying topics..."
 python -m euraxess_scraper.cli classify-topics --only-missing
+
+echo "[4/6] Detecting languages..."
+python -m euraxess_scraper.cli detect-language --only-missing
+
+echo "[5/6] Building search index..."
 python -m euraxess_scraper.cli build-index
-python -m euraxess_scraper.cli export --format parquet --output data/exports/jobs.parquet
+
+echo "[6/6] Stats..."
 python -m euraxess_scraper.cli stats

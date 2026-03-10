@@ -1,0 +1,115 @@
+name: Daily EURAXESS Update
+
+on:
+  schedule:
+    - cron: '0 4 * * 1-6'  # Mon–Sat 04:00 UTC: fast incremental (new jobs only)
+    - cron: '0 3 * * 0'    # Sunday  03:00 UTC: full scan + delisting check
+  workflow_dispatch:        # Allow manual trigger from the GitHub Actions UI
+
+permissions:
+  contents: write           # Required to create/update GitHub Releases
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-v1
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv pip install -e . --system
+
+      - name: Download database from latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data/index
+          if gh release view db-latest --repo ${{ github.repository }} &>/dev/null; then
+            echo "Downloading database and index files..."
+            gh release download db-latest \
+              --repo ${{ github.repository }} \
+              --dir data/tmp/
+            mv data/tmp/euraxess.db data/euraxess.db
+            for f in faiss.index faiss_mapping.json vectors.npy; do
+              [ -f "data/tmp/$f" ] && mv "data/tmp/$f" "data/index/$f" || true
+            done
+            rm -rf data/tmp
+            echo "Database size: $(du -sh data/euraxess.db | cut -f1)"
+          else
+            echo "No existing release found — database will be built from scratch."
+          fi
+
+      - name: Update jobs
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 3 * * 0" ]; then
+            echo "Running full weekly scan (delisting enabled)..."
+            python -m euraxess_scraper.cli update --rps 0.5 --concurrency 2
+          else
+            echo "Running daily incremental update..."
+            python -m euraxess_scraper.cli update \
+              --max-pages 30 --no-delist --rps 0.5 --concurrency 2
+          fi
+
+      - name: Classify roles
+        run: python -m euraxess_scraper.cli reclassify
+
+      - name: Classify topics
+        run: |
+          python -m euraxess_scraper.cli classify-topics \
+            --only-missing --batch-size 32
+
+      - name: Detect languages
+        run: python -m euraxess_scraper.cli detect-language --only-missing
+
+      - name: Build search index
+        run: python -m euraxess_scraper.cli build-index
+
+      - name: Show stats
+        run: python -m euraxess_scraper.cli stats
+
+      - name: Upload updated database to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPDATED_AT=$(date -u +"%Y-%m-%d %H:%M UTC")
+          NOTES=$(python -m euraxess_scraper.cli stats 2>&1 | tail -30)
+          FILES=(
+            data/euraxess.db
+            data/index/faiss.index
+            data/index/faiss_mapping.json
+            data/index/vectors.npy
+          )
+
+          if gh release view db-latest --repo ${{ github.repository }} &>/dev/null; then
+            gh release upload db-latest "${FILES[@]}" \
+              --repo ${{ github.repository }} --clobber
+            gh release edit db-latest \
+              --repo ${{ github.repository }} \
+              --title "Database: latest (updated $UPDATED_AT)" \
+              --notes "**Last updated:** $UPDATED_AT
+
+$NOTES"
+          else
+            gh release create db-latest "${FILES[@]}" \
+              --repo ${{ github.repository }} \
+              --title "Database: latest (updated $UPDATED_AT)" \
+              --notes "**Last updated:** $UPDATED_AT
+
+$NOTES" \
+              --prerelease
+          fi
