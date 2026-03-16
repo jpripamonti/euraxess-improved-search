@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ job.title or "Job detail" }} - EURAXESS Role Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3efe4;
+      --ink: #111827;
+      --card: #fefaf2;
+      --muted: #55626d;
+      --accent: #0b7285;
+      --line: #d7d2c7;
+      --pill: #ffe08a;
+      --topic: #e8f3ff;
+      --topic-border: #b3d5ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 15%, #f8d8a533 0, transparent 45%),
+        radial-gradient(circle at 93% 78%, #6aa6b833 0, transparent 40%),
+        var(--bg);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 18px 42px;
+    }
+    .topbar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .topbar a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      padding: 8px 11px;
+      font-weight: 600;
+    }
+    .hero {
+      border: 1px solid var(--line);
+      background: linear-gradient(120deg, #fff9eb, #eff8fa 58%, #fffef9);
+      border-radius: 22px;
+      padding: 22px;
+      margin-bottom: 16px;
+      box-shadow: 0 9px 30px #5a6f7a1a;
+    }
+    .hero h1 {
+      margin: 0 0 8px;
+      font-family: "Fraunces", serif;
+      font-size: 1.8rem;
+      line-height: 1.15;
+    }
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      border: 1px solid #e5c564;
+      background: var(--pill);
+    }
+    .topic-pill {
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.76rem;
+      border: 1px solid var(--topic-border);
+      background: var(--topic);
+    }
+    .meta {
+      color: var(--muted);
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 0.9rem;
+    }
+    .section {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+      font-family: "Fraunces", serif;
+    }
+    .section p {
+      margin: 0;
+      color: #1f2937;
+      white-space: pre-wrap;
+      line-height: 1.45;
+    }
+    .section .muted {
+      color: var(--muted);
+      font-style: italic;
+    }
+    .conf-item { display: inline-flex; align-items: center; gap: 5px; }
+    .conf-bar-outer {
+      display: inline-block; width: 48px; height: 6px;
+      border-radius: 3px; background: #e0dcd4; overflow: hidden; flex-shrink: 0;
+    }
+    .conf-bar-inner { display: block; height: 100%; border-radius: 3px; }
+    @media (max-width: 760px) {
+      .hero h1 { font-size: 1.45rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a href="{{ back_url }}">Back to results</a>
+      <a href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open original EURAXESS posting</a>
+    </div>
+
+    <section class="hero">
+      <h1>{{ job.title or "Untitled position" }}</h1>
+      <div class="pill-row">
+        <span class="pill">{{ job.job_type_inferred or "unknown" }}</span>
+        <span class="topic-pill">{{ topic_labels.get(topic_domain, topic_domain) }}</span>
+        {% if job.language and job.language != "unknown" %}
+        <span class="topic-pill">{{ job.language.upper() }}</span>
+        {% endif %}
+      </div>
+      <div class="meta">
+        <span>{{ job.organization or "Unknown organization" }}</span>
+        <span>{{ job.country or "Country n/a" }}{% if job.city %}, {{ job.city }}{% endif %}</span>
+        <span>Deadline: {{ job.deadline or "n/a" }}</span>
+        <span>Posted: {{ job.posted_date or "n/a" }}</span>
+        {% if job.topic_confidence is not none %}
+        {% set topic_pct = (job.topic_confidence * 100) | round | int %}
+        {% set topic_hue = (topic_pct * 120 // 100) %}
+        <span class="conf-item" title="Topic confidence: {{ topic_pct }}/100 (embedding similarity)">
+          Topic
+          <span class="conf-bar-outer"><span class="conf-bar-inner" style="width:{{ topic_pct }}%;background:hsl({{ topic_hue }},70%,42%)"></span></span>
+          {{ topic_pct }}
+        </span>
+        {% endif %}
+      </div>
+    </section>
+
+    {% set sections_order = [
+      ("offer_description", "Offer Description"),
+      ("requirements", "Requirements"),
+      ("additional_information", "Additional Information"),
+      ("where_to_apply", "Where to Apply"),
+      ("work_locations", "Work Locations"),
+      ("contact", "Contact")
+    ] %}
+    {% set ns = namespace(has_sections=false) %}
+    {% for key, label in sections_order %}
+      {% if sections.get(key) %}
+      {% set ns.has_sections = true %}
+      <section class="section">
+        <h2>{{ label }}</h2>
+        <p>{{ sections.get(key) }}</p>
+      </section>
+      {% endif %}
+    {% endfor %}
+
+    {% if not ns.has_sections %}
+      <section class="section">
+        <h2>Full Text</h2>
+        {% if job.cleaned_text %}
+        <p>{{ job.cleaned_text }}</p>
+        {% else %}
+        <p class="muted">No parsed details are currently available for this position.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  </div>
+</body>
+</html>

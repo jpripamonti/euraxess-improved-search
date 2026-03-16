@@ -1,0 +1,392 @@
+topic_domains:
+  # ── Computer Science & Data Science ─────────────────────────────────────────
+  # Split out from engineering_technology because CS/AI/data-science research
+  # postings are semantically very different from classical engineering postings,
+  # and the combined prototype caused both to score poorly.
+  computer_science:
+    label: Computer Science & AI
+    description: >
+      Computer science, software engineering, artificial intelligence, machine
+      learning, deep learning, data science, algorithms, cybersecurity, natural
+      language processing, computer vision, and computational research.
+    seed_terms:
+      - computer science
+      - software engineering
+      - programming
+      - algorithms
+      - data structures
+      - artificial intelligence
+      - machine learning
+      - deep learning
+      - neural networks
+      - large language models
+      - natural language processing
+      - computer vision
+      - reinforcement learning
+      - generative AI
+      - data science
+      - big data
+      - data mining
+      - data engineering
+      - databases
+      - information retrieval
+      - cybersecurity
+      - network security
+      - distributed systems
+      - cloud computing
+      - high-performance computing
+      - scientific computing
+      - human-computer interaction
+      - user interface design
+      - graph theory
+      - formal methods
+      - programming languages
+      - compiler design
+      - operating systems
+      - digital twin
+      - Internet of Things
+
+  # ── Natural Sciences ─────────────────────────────────────────────────────────
+  natural_sciences:
+    label: Natural Sciences
+    description: >
+      Physics, chemistry, mathematics, astronomy, earth sciences, fundamental
+      biology, ecology, molecular biology, and environmental science.
+    seed_terms:
+      # Physics
+      - physics
+      - quantum physics
+      - quantum mechanics
+      - condensed matter
+      - particle physics
+      - nuclear physics
+      - optics
+      - photonics
+      - laser
+      - acoustics
+      - astrophysics
+      - cosmology
+      - plasma physics
+      # Chemistry
+      - chemistry
+      - organic chemistry
+      - inorganic chemistry
+      - physical chemistry
+      - analytical chemistry
+      - electrochemistry
+      - catalysis
+      - thermodynamics
+      - spectroscopy
+      - crystallography
+      - polymer chemistry
+      # Mathematics & Statistics
+      - mathematics
+      - pure mathematics
+      - algebra
+      - geometry
+      - topology
+      - analysis
+      - number theory
+      - combinatorics
+      - statistics
+      - probability theory
+      - mathematical modeling
+      - numerical analysis
+      - optimization
+      # Biology (non-clinical)
+      - biology
+      - molecular biology
+      - cell biology
+      - biochemistry
+      - genetics
+      - genomics
+      - proteomics
+      - biophysics
+      - structural biology
+      - evolutionary biology
+      - microbiology
+      - virology
+      # Earth & Environment
+      - earth science
+      - geophysics
+      - geochemistry
+      - geology
+      - oceanography
+      - atmospheric science
+      - climate science
+      - ecology
+      - environmental science
+      - biodiversity
+      - conservation biology
+      # Astronomy
+      - astronomy
+      - planetary science
+      - space science
+
+  # ── Engineering & Technology ─────────────────────────────────────────────────
+  engineering_technology:
+    label: Engineering & Technology
+    description: >
+      Mechanical, civil, electrical, chemical, and aerospace engineering;
+      robotics, automation, materials engineering, energy systems, signal
+      processing, and applied industrial technology.
+    seed_terms:
+      # Classical engineering
+      - engineering
+      - mechanical engineering
+      - civil engineering
+      - structural engineering
+      - electrical engineering
+      - chemical engineering
+      - aerospace engineering
+      - industrial engineering
+      - bioengineering
+      - systems engineering
+      # Manufacturing & Design
+      - manufacturing
+      - additive manufacturing
+      - 3D printing
+      - product design
+      - process engineering
+      - quality control
+      # Robotics & Automation
+      - robotics
+      - automation
+      - mechatronics
+      - control systems
+      - actuators
+      - sensors
+      # Energy & Environment
+      - energy systems
+      - renewable energy
+      - solar energy
+      - wind energy
+      - power systems
+      - fuel cell
+      - battery
+      - hydrogen
+      # Electronics & Materials
+      - semiconductor
+      - microelectronics
+      - nanotechnology
+      - photovoltaics
+      - materials engineering
+      - composites
+      - corrosion
+      # Signal & Communications
+      - signal processing
+      - telecommunications
+      - antenna
+      - radar
+      - wireless
+      # Fluid & Thermal
+      - fluid mechanics
+      - heat transfer
+      - thermodynamics
+      - computational fluid dynamics
+      - CFD
+
+  # ── Medical & Health Sciences ────────────────────────────────────────────────
+  medical_health:
+    label: Medical & Health Sciences
+    description: >
+      Biomedical research, clinical medicine, public health, pharmacy,
+      neuroscience, oncology, immunology, and life-science health research.
+    seed_terms:
+      # Clinical medicine
+      - medicine
+      - clinical research
+      - clinical trial
+      - surgery
+      - oncology
+      - cardiology
+      - neurology
+      - psychiatry
+      - radiology
+      - pathology
+      - dermatology
+      - pediatrics
+      - ophthalmology
+      - orthopedics
+      - obstetrics
+      - dentistry
+      # Biomedical & life sciences (health focus)
+      - biomedical
+      - immunology
+      - cancer biology
+      - cell therapy
+      - gene therapy
+      - drug discovery
+      - pharmacology
+      - pharmacy
+      - toxicology
+      - medical imaging
+      # Neuroscience
+      - neuroscience
+      - cognitive science
+      - brain research
+      - neuroimaging
+      - neurodegeneration
+      # Public health
+      - public health
+      - epidemiology
+      - global health
+      - health policy
+      - nutrition
+      - occupational health
+      # Genetics & omics (health/medical context)
+      - translational research
+      - precision medicine
+      - bioinformatics
+      - computational biology
+
+  # ── Agricultural & Veterinary Sciences ──────────────────────────────────────
+  agricultural_veterinary:
+    label: Agricultural & Veterinary Sciences
+    description: >
+      Agriculture, food science, veterinary medicine, forestry, fisheries,
+      plant science, animal science, agronomy, and rural development.
+    seed_terms:
+      - agriculture
+      - agronomy
+      - crop science
+      - plant science
+      - plant biology
+      - plant pathology
+      - horticulture
+      - soil science
+      - fertilizer
+      - pesticide
+      - food science
+      - food technology
+      - food safety
+      - nutrition science
+      - aquaculture
+      - fisheries
+      - marine biology
+      - forestry
+      - silviculture
+      - timber
+      - animal science
+      - animal nutrition
+      - animal genetics
+      - livestock
+      - poultry
+      - veterinary medicine
+      - veterinary science
+      - zoology
+      - entomology
+      - rural development
+      - sustainable agriculture
+      - agroecology
+
+  # ── Social Sciences ──────────────────────────────────────────────────────────
+  social_sciences:
+    label: Social Sciences
+    description: >
+      Economics, sociology, political science, law, psychology, education,
+      anthropology, management, international relations, and human geography.
+    seed_terms:
+      - economics
+      - macroeconomics
+      - microeconomics
+      - econometrics
+      - finance
+      - accounting
+      - management
+      - organizational behavior
+      - business administration
+      - sociology
+      - social policy
+      - welfare
+      - inequality
+      - demography
+      - population studies
+      - political science
+      - international relations
+      - governance
+      - public administration
+      - policy analysis
+      - law
+      - legal studies
+      - jurisprudence
+      - criminology
+      - human rights
+      - psychology
+      - cognitive psychology
+      - behavioral science
+      - social psychology
+      - educational psychology
+      - education
+      - pedagogy
+      - didactics
+      - curriculum
+      - human geography
+      - urban studies
+      - planning
+      - anthropology
+      - ethnography
+      - communication studies
+      - media studies
+      - journalism
+
+  # ── Humanities & Arts ────────────────────────────────────────────────────────
+  humanities_arts:
+    label: Humanities & Arts
+    description: >
+      History, philosophy, languages, literature, linguistics, theology,
+      cultural studies, performing arts, visual arts, and digital humanities.
+    seed_terms:
+      - history
+      - historiography
+      - medieval history
+      - modern history
+      - archaeology
+      - heritage
+      - philosophy
+      - ethics
+      - metaphysics
+      - epistemology
+      - logic
+      - political philosophy
+      - literature
+      - literary studies
+      - comparative literature
+      - poetry
+      - fiction
+      - linguistics
+      - phonetics
+      - syntax
+      - semantics
+      - pragmatics
+      - sociolinguistics
+      - translation studies
+      - languages
+      - foreign language
+      - applied linguistics
+      - theology
+      - religious studies
+      - Islamic studies
+      - biblical studies
+      - cultural studies
+      - cultural heritage
+      - gender studies
+      - postcolonial studies
+      - arts
+      - fine arts
+      - visual arts
+      - music
+      - musicology
+      - performing arts
+      - theatre
+      - dance
+      - film studies
+      - cinema
+      - architecture history
+      - digital humanities
+
+  # ── Catch-all ────────────────────────────────────────────────────────────────
+  other:
+    label: Other / Interdisciplinary
+    description: Fallback when no broad domain has sufficient confidence, or for genuinely interdisciplinary research.
+    seed_terms: []
