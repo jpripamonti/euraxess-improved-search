@@ -31,6 +31,21 @@ def test_extract_job_links_from_search_fixture():
     assert all(job_id.isdigit() for job_id in job_ids)
 
 
+def test_extract_job_links_from_html_skips_malformed_href():
+    html = """
+    <html>
+      <body>
+        <a href="http://[::1">broken</a>
+        <a href="/jobs/12345">valid</a>
+      </body>
+    </html>
+    """
+
+    links = extract_job_links_from_html(html)
+
+    assert links == [("12345", "https://euraxess.ec.europa.eu/jobs/12345")]
+
+
 def test_extract_pagination_pages_from_search_fixture():
     html = Path("tests/fixtures/search_results_page.html").read_text(encoding="utf-8")
     pages = extract_pagination_pages_from_html(html)

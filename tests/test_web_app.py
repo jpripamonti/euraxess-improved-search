@@ -16,6 +16,8 @@ def _insert_job(
     job_type_inferred: str,
     topic_domain: str = "other",
     sections_json: str | None = None,
+    job_type_score: int = 60,
+    topic_confidence: float = 0.72,
 ):
     record = {column: None for column in db.JOB_COLUMNS}
     record.update(
@@ -34,9 +36,9 @@ def _insert_job(
             "http_status": 200,
             "deadline": "2099-01-01T00:00:00Z",
             "job_type_inferred": job_type_inferred,
-            "job_type_score": 60,
+            "job_type_score": job_type_score,
             "topic_domain": topic_domain,
-            "topic_confidence": 0.72,
+            "topic_confidence": topic_confidence,
             "topic_scores_json": json.dumps(
                 {
                     "engineering_technology": 0.88,
@@ -128,6 +130,98 @@ def test_search_results_link_to_local_detail_page(tmp_path):
     assert response.status_code == 200
     assert "/jobs/100" in response.text
     assert "Show description" in response.text
+
+
+def test_search_page_renders_country_select_and_advanced_filters(tmp_path):
+    db_path = tmp_path / "app.db"
+    _seed_db(db_path)
+    app = create_app(db_path=db_path, index_dir=tmp_path / "index")
+    client = TestClient(app)
+
+    response = client.get("/search", params={"q": "", "job_type": "all", "active_only": "true", "open_only": "true"})
+
+    assert response.status_code == 200
+    assert "All countries" in response.text
+    assert "Advanced Filters" in response.text
+    assert "Extended role bucket" in response.text
+
+
+def test_search_page_warns_when_include_and_exclude_topics_overlap(tmp_path):
+    db_path = tmp_path / "app.db"
+    _seed_db(db_path)
+    app = create_app(db_path=db_path, index_dir=tmp_path / "index")
+    client = TestClient(app)
+
+    response = client.get(
+        "/search",
+        params=[
+            ("q", ""),
+            ("include_topic", "other"),
+            ("exclude_topic", "other"),
+            ("active_only", "true"),
+            ("open_only", "true"),
+        ],
+    )
+
+    assert response.status_code == 200
+    assert "Topic selections overlap" in response.text
+
+
+def test_search_page_hides_role_confidence_below_selected_threshold(tmp_path):
+    db_path = tmp_path / "app.db"
+    _seed_db(db_path)
+    app = create_app(db_path=db_path, index_dir=tmp_path / "index")
+    client = TestClient(app)
+
+    response = client.get(
+        "/search",
+        params={
+            "q": "",
+            "job_type": "postdoc",
+            "min_role_confidence": "50",
+            "active_only": "true",
+            "open_only": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'name="min_role_confidence"' in response.text
+    assert 'option value="50" selected' in response.text
+    assert "Role confidence:" not in response.text
+    assert "Topic confidence:" in response.text
+
+
+def test_search_page_hides_topic_confidence_below_selected_threshold(tmp_path):
+    db_path = tmp_path / "app.db"
+    conn = db.get_connection(db_path)
+    db.init_db(conn)
+    _insert_job(
+        conn,
+        job_id="200",
+        title="Postdoc in Policy",
+        job_type_inferred="postdoc",
+        topic_domain="social_sciences",
+        topic_confidence=0.32,
+    )
+    conn.close()
+    app = create_app(db_path=db_path, index_dir=tmp_path / "index")
+    client = TestClient(app)
+
+    response = client.get(
+        "/search",
+        params={
+            "q": "",
+            "job_type": "postdoc",
+            "min_topic_confidence": "50",
+            "active_only": "true",
+            "open_only": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'name="min_topic_confidence"' in response.text
+    assert 'option value="50" selected' in response.text
+    assert "Topic confidence:" not in response.text
 
 
 def test_job_detail_page_renders_sections(tmp_path):

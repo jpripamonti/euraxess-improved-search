@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from .. import config, db, search as search_mod
 from ..language import language_label
 from ..taxonomy import default_type_labels
-from ..topics import TOPIC_OTHER, default_topic_labels
+from ..topics import TOPIC_OTHER, default_topic_labels, normalize_topic_filters
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -40,17 +40,19 @@ def create_app(
     def _build_facet_labels(
         db_path: Path,
         *,
+        country: str | None,
         language: str | None,
         job_type: str | None,
         include_topics: list[str] | None,
         exclude_topics: list[str] | None,
         active_only: bool,
         open_only: bool,
-    ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-        """Return (language_labels, type_labels, topic_filter_labels) with context-aware counts."""
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str], dict[str, str], dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
+        """Return labels for country/language/type/topic filters with context-aware counts."""
         conn = db.get_connection(db_path)
         try:
             facet_kwargs: dict[str, Any] = dict(
+                country=country,
                 language=language,
                 job_type=job_type,
                 include_topics=include_topics or [],
@@ -58,11 +60,18 @@ def create_app(
                 active_only=active_only,
                 open_only=open_only,
             )
+            country_counts = db.facet_counts(conn, "country", **facet_kwargs)
             lang_counts = db.facet_counts(conn, "language", **facet_kwargs)
             type_counts = db.facet_counts(conn, "job_type_inferred", include_unknown=True, **facet_kwargs)
             topic_counts = db.facet_counts(conn, "topic_domain", **facet_kwargs)
         finally:
             conn.close()
+
+        country_labels: dict[str, str] = {"all": "All countries"}
+        country_name_labels: dict[str, str] = {}
+        for name, count in country_counts:
+            country_labels[name] = f"{name} ({count:,})"
+            country_name_labels[name] = name
 
         lang_labels: dict[str, str] = {"all": "All languages"}
         lang_name_labels: dict[str, str] = {}  # plain names without counts, for display in cards
@@ -72,30 +81,29 @@ def create_app(
             lang_name_labels[code] = name
 
         type_count_map = dict(type_counts)
-        # Override short pill labels with more descriptive dropdown labels
+        PRIMARY_TYPE_KEYS = ("all", "postdoc", "phd", "professor")
         DROPDOWN_LABELS: dict[str, str] = {
             "all": "All",
             "postdoc": "Postdoc",
             "phd": "PhD",
             "professor": "Professor",
-            # Extended categories — only shown when there is data
             "other": "Research Support / Technical Staff",
             "unknown": "Open Call / Any Level",
         }
-        ALWAYS_SHOW = {"all", "postdoc", "phd", "professor"}
-
-        type_labels: dict[str, str] = {}
-        for key, label in DROPDOWN_LABELS.items():
+        primary_type_labels: dict[str, str] = {}
+        for key in PRIMARY_TYPE_KEYS:
+            label = DROPDOWN_LABELS[key]
             if key == "all":
-                type_labels["all"] = "All"
-            elif key in ALWAYS_SHOW:
-                if key in type_count_map:
-                    type_labels[key] = f"{label} ({type_count_map[key]:,})"
-                else:
-                    type_labels[key] = label
+                primary_type_labels[key] = label
             elif key in type_count_map:
-                # "other" and "unknown" only appear when there are matching jobs
-                type_labels[key] = f"{label} ({type_count_map[key]:,})"
+                primary_type_labels[key] = f"{label} ({type_count_map[key]:,})"
+            else:
+                primary_type_labels[key] = label
+
+        extended_type_labels: dict[str, str] = {"": "None"}
+        for key in ("other", "unknown"):
+            if key in type_count_map:
+                extended_type_labels[key] = f"{DROPDOWN_LABELS[key]} ({type_count_map[key]:,})"
 
         topic_count_map = dict(topic_counts)
         base_topic = default_topic_labels()
@@ -108,7 +116,19 @@ def create_app(
             else:
                 topic_filter_labels[key] = label
 
-        return lang_labels, lang_name_labels, type_labels, topic_filter_labels
+        summary_type_labels = {key: value for key, value in DROPDOWN_LABELS.items() if key != "all"}
+        summary_type_labels["all"] = "All"
+
+        return (
+            country_labels,
+            country_name_labels,
+            lang_labels,
+            lang_name_labels,
+            primary_type_labels,
+            extended_type_labels,
+            topic_filter_labels,
+            summary_type_labels,
+        )
 
     def _search_payload(
         *,
@@ -151,6 +171,7 @@ def create_app(
         *,
         q: str,
         job_type: str | None,
+        extended_job_type: str | None,
         topic: str | None,
         include_topics: list[str] | None,
         exclude_topics: list[str] | None,
@@ -161,14 +182,22 @@ def create_app(
         active_only: bool,
         open_only: bool,
         debug: bool,
+        min_role_confidence: int,
+        min_topic_confidence: int,
     ) -> HTMLResponse:
+        effective_job_type = extended_job_type or job_type
+        effective_country = None if country in {None, "", "all"} else country
+        raw_include_topics = normalize_topic_filters(include_topics or [])
+        raw_exclude_topics = normalize_topic_filters(exclude_topics or [])
+        topic_overlap = [value for value in raw_include_topics if value in set(raw_exclude_topics)]
+
         payload = _search_payload(
             q=q,
-            job_type=job_type,
+            job_type=effective_job_type,
             topic=topic,
             include_topics=include_topics,
             exclude_topics=exclude_topics,
-            country=country,
+            country=effective_country,
             language=language,
             page=page,
             page_size=page_size,
@@ -178,10 +207,17 @@ def create_app(
         )
         base_params: dict[str, Any] = {
             "q": q,
-            "job_type": payload["job_type"],
-            "country": country or "",
+            "country": country or "all",
             "page_size": page_size,
         }
+        if payload["job_type"] in {"other", "unknown"}:
+            base_params["extended_job_type"] = payload["job_type"]
+        else:
+            base_params["job_type"] = payload["job_type"]
+        if min_role_confidence > 0:
+            base_params["min_role_confidence"] = min_role_confidence
+        if min_topic_confidence > 0:
+            base_params["min_topic_confidence"] = min_topic_confidence
         if payload.get("language") and payload["language"] != "all":
             base_params["language"] = payload["language"]
         for value in payload.get("include_topics") or []:
@@ -209,8 +245,18 @@ def create_app(
 
         prev_page = (page - 1) if page > 1 else None
         next_page = (page + 1) if payload["has_next"] else None
-        lang_labels, lang_name_labels, type_labels, topic_filter_labels = _build_facet_labels(
+        (
+            country_labels,
+            country_name_labels,
+            lang_labels,
+            lang_name_labels,
+            primary_type_labels,
+            extended_type_labels,
+            topic_filter_labels,
+            summary_type_labels,
+        ) = _build_facet_labels(
             selected_db_path,
+            country=effective_country,
             language=payload.get("language") if payload.get("language") != "all" else None,
             job_type=payload["job_type"] if payload["job_type"] != "all" else None,
             include_topics=payload.get("include_topics") or [],
@@ -222,16 +268,24 @@ def create_app(
             "request": request,
             "payload": payload,
             "q": q,
-            "country": country or "",
-            "job_type": payload["job_type"],
+            "country": effective_country or "all",
+            "job_type": payload["job_type"] if payload["job_type"] in {"all", "postdoc", "phd", "professor"} else "all",
+            "extended_job_type": payload["job_type"] if payload["job_type"] in {"other", "unknown"} else "",
             "topic": payload["topic"],
             "include_topics": payload.get("include_topics") or [],
             "exclude_topics": payload.get("exclude_topics") or [],
+            "topic_overlap_labels": [default_topic_labels().get(value, value) for value in topic_overlap],
             "language": payload.get("language") or "all",
             "active_only": active_only,
             "open_only": open_only,
             "debug": debug,
-            "type_labels": type_labels,
+            "min_role_confidence": min_role_confidence,
+            "min_topic_confidence": min_topic_confidence,
+            "country_labels": country_labels,
+            "country_name_labels": country_name_labels,
+            "primary_type_labels": primary_type_labels,
+            "extended_type_labels": extended_type_labels,
+            "summary_type_labels": summary_type_labels,
             "type_name_labels": default_type_labels(),  # short labels for card pills (no counts)
             "topic_labels": default_topic_labels(),
             "topic_filter_labels": topic_filter_labels,
@@ -250,6 +304,7 @@ def create_app(
             request,
             q="",
             job_type=None,
+            extended_job_type=None,
             topic=None,
             include_topics=[],
             exclude_topics=[],
@@ -260,6 +315,8 @@ def create_app(
             active_only=True,
             open_only=True,
             debug=False,
+            min_role_confidence=0,
+            min_topic_confidence=0,
         )
 
     @app.get("/search", response_class=HTMLResponse)
@@ -267,6 +324,7 @@ def create_app(
         request: Request,
         q: str = Query("", description="Free-text search"),
         job_type: str | None = Query(None, description="all|postdoc|phd|professor"),
+        extended_job_type: str | None = Query(None, description="other|unknown"),
         topic: str | None = Query(None, description="legacy single-topic filter"),
         include_topic: list[str] | None = Query(None, description="Include any of these topics"),
         exclude_topic: list[str] | None = Query(None, description="Exclude these topics"),
@@ -277,11 +335,14 @@ def create_app(
         active_only: bool = Query(True),
         open_only: bool = Query(True),
         debug: bool = Query(False),
+        min_role_confidence: int = Query(0, ge=0, le=100),
+        min_topic_confidence: int = Query(0, ge=0, le=100),
     ) -> HTMLResponse:
         return _render_page(
             request,
             q=q,
             job_type=job_type,
+            extended_job_type=extended_job_type,
             topic=topic,
             include_topics=include_topic or [],
             exclude_topics=exclude_topic or [],
@@ -292,6 +353,8 @@ def create_app(
             active_only=active_only,
             open_only=open_only,
             debug=debug,
+            min_role_confidence=min_role_confidence,
+            min_topic_confidence=min_topic_confidence,
         )
 
     @app.get("/api/search")

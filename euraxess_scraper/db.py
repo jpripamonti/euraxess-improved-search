@@ -558,6 +558,7 @@ def facet_counts(
     conn: sqlite3.Connection,
     field: str,
     *,
+    country: str | None = None,
     language: str | None = None,
     job_type: str | None = None,
     include_topics: list[str] | None = None,
@@ -580,6 +581,10 @@ def facet_counts(
 
     clauses = ["http_status = 200", "cleaned_text IS NOT NULL", "TRIM(cleaned_text) != ''"]
     params: list[Any] = []
+
+    if field != "country" and country and country not in {"all", "any", ""}:
+        clauses.append("LOWER(country) = ?")
+        params.append(country.lower())
 
     if field != "language" and language and language not in {"all", "any", ""}:
         clauses.append("COALESCE(language, 'unknown') = ?")

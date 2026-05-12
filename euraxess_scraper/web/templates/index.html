@@ -68,15 +68,52 @@
     }
     .topic-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 12px;
       margin-bottom: 12px;
     }
     .grid-bottom {
       display: grid;
-      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
       gap: 12px;
       align-items: center;
+    }
+    .advanced {
+      margin-top: 14px;
+      border-top: 1px dashed var(--line);
+      padding-top: 12px;
+    }
+    .advanced summary {
+      cursor: pointer;
+      color: #084d58;
+      font-weight: 700;
+      list-style: none;
+    }
+    .advanced summary::-webkit-details-marker {
+      display: none;
+    }
+    .advanced-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+      align-items: end;
+    }
+    .advanced-note {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .warning {
+      margin: 12px 0 0;
+      border-radius: 12px;
+      background: #fff2d7;
+      border: 1px solid #e7c983;
+      color: #6c4f00;
+      padding: 11px 12px;
+      font-size: 0.88rem;
+      line-height: 1.4;
     }
     label {
       display: block;
@@ -234,7 +271,7 @@
       border-radius: 3px;
     }
     @media (max-width: 900px) {
-      .grid, .grid-bottom, .topic-grid { grid-template-columns: 1fr; }
+      .grid, .grid-bottom, .topic-grid, .advanced-grid { grid-template-columns: 1fr; }
       .title-row { flex-direction: column; }
       .type-pill { align-self: flex-start; }
       .hero h1 { font-size: 1.6rem; }
@@ -258,14 +295,18 @@
           <div>
             <label for="job_type">Role type</label>
             <select id="job_type" name="job_type">
-              {% for value, label in type_labels.items() %}
+              {% for value, label in primary_type_labels.items() %}
               <option value="{{ value }}" {% if job_type == value %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
           </div>
           <div>
-            <label for="country">Country (optional)</label>
-            <input id="country" name="country" type="text" value="{{ country }}" placeholder="Germany" />
+            <label for="country">Country</label>
+            <select id="country" name="country">
+              {% for value, label in country_labels.items() %}
+              <option value="{{ value }}" {% if country == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div>
             <label for="language">Language</label>
@@ -279,18 +320,10 @@
 
         <div class="topic-grid">
           <div>
-            <label for="include_topic">Include topics (multi-select)</label>
+            <label for="include_topic">Topics (multi-select)</label>
             <select id="include_topic" name="include_topic" multiple>
               {% for value, label in topic_filter_labels.items() %}
               <option value="{{ value }}" {% if value in include_topics %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label for="exclude_topic">Exclude topics (multi-select)</label>
-            <select id="exclude_topic" name="exclude_topic" multiple>
-              {% for value, label in topic_filter_labels.items() %}
-              <option value="{{ value }}" {% if value in exclude_topics %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
           </div>
@@ -299,15 +332,62 @@
         <div class="grid-bottom">
           <label><input type="checkbox" name="active_only" value="true" {% if active_only %}checked{% endif %}> Active only</label>
           <label><input type="checkbox" name="open_only" value="true" {% if open_only %}checked{% endif %}> Open deadlines</label>
-          <div></div>
           <button class="btn" type="submit">Search Jobs</button>
         </div>
+
+        {% if topic_overlap_labels %}
+        <div class="warning">
+          Topic selections overlap. Any topic picked in both lists is treated as excluded: <strong>{{ topic_overlap_labels | join(", ") }}</strong>.
+        </div>
+        {% endif %}
+
+        <details class="advanced" {% if extended_job_type or exclude_topics or min_role_confidence > 0 or min_topic_confidence > 0 %}open{% endif %}>
+          <summary>Advanced Filters</summary>
+          <div class="advanced-grid">
+            <div>
+              <label for="extended_job_type">Extended role bucket</label>
+              <select id="extended_job_type" name="extended_job_type">
+                {% for value, label in extended_type_labels.items() %}
+                <option value="{{ value }}" {% if extended_job_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label for="min_role_confidence">Show role confidence badge from</label>
+              <select id="min_role_confidence" name="min_role_confidence">
+                {% for value in [0, 25, 50, 75] %}
+                <option value="{{ value }}" {% if min_role_confidence == value %}selected{% endif %}>{{ value }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label for="min_topic_confidence">Show topic confidence badge from</label>
+              <select id="min_topic_confidence" name="min_topic_confidence">
+                {% for value in [0, 25, 50, 75] %}
+                <option value="{{ value }}" {% if min_topic_confidence == value %}selected{% endif %}>{{ value }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label for="exclude_topic">Hide topics (multi-select)</label>
+              <select id="exclude_topic" name="exclude_topic" multiple>
+                {% for value, label in topic_filter_labels.items() %}
+                <option value="{{ value }}" {% if value in exclude_topics %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <p class="advanced-note">These controls adjust classifier-derived badges or expose fallback buckets. They do not define the main search path.</p>
+        </details>
       </form>
     </section>
 
     <p class="summary">
       Showing {{ payload.results | length }} of {{ payload.total }} result(s).
-      {% if payload.job_type != "all" %} Strict filter: <strong>{{ type_name_labels.get(payload.job_type, payload.job_type) }}</strong>.{% endif %}
+      {% if payload.job_type != "all" %} Role filter: <strong>{{ summary_type_labels.get(payload.job_type, payload.job_type) }}</strong>.{% endif %}
+      {% if country and country != "all" %}
+      Country: <strong>{{ country_name_labels.get(country, country) }}</strong>.
+      {% endif %}
       {% if language and language != "all" %}
       Language: <strong>{{ language_name_labels.get(language, language.upper()) }}</strong>.
       {% endif %}
@@ -339,6 +419,7 @@
           {% if row.job_type_inferred and row.job_type_inferred != "unknown" and row.job_type_score is not none %}
           {% set _r = (row.job_type_score * 100 // 127) %}
           {% set role_pct = [0, [_r, 100] | min] | max %}
+          {% if role_pct >= min_role_confidence %}
           {% set role_hue = (role_pct * 120 // 100) %}
           <span class="conf-item" title="Role confidence: {{ role_pct }}/100 (keyword + profile signal)">
             Role
@@ -346,14 +427,17 @@
             {{ role_pct }}
           </span>
           {% endif %}
+          {% endif %}
           {% if row.topic_confidence is not none %}
           {% set topic_pct = (row.topic_confidence * 100) | round | int %}
+          {% if topic_pct >= min_topic_confidence %}
           {% set topic_hue = (topic_pct * 120 // 100) %}
           <span class="conf-item" title="Topic confidence: {{ topic_pct }}/100 (embedding similarity)">
             Topic
             <span class="conf-bar-outer"><span class="conf-bar-inner" style="width:{{ topic_pct }}%;background:hsl({{ topic_hue }},70%,42%)"></span></span>
             {{ topic_pct }}
           </span>
+          {% endif %}
           {% endif %}
         </div>
         <details class="desc-toggle">
@@ -364,7 +448,7 @@
       {% endfor %}
     {% else %}
       <div class="empty">
-        No matches found for this strict combination of filters. Try removing the country or switching role type.
+        No matches found for this combination of filters. Try broadening the role or topic filters, changing the country, or turning off `Active only` and `Open deadlines`.
       </div>
     {% endif %}
 

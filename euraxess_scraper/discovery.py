@@ -45,7 +45,11 @@ def extract_job_links_from_html(html: str, base_url: str = config.BASE_URL) -> l
         href = anchor.get("href", "")
         if not href:
             continue
-        url = canonicalize_url(href, base_url=base_url)
+        try:
+            url = canonicalize_url(href, base_url=base_url)
+        except Exception as exc:
+            LOGGER.debug("Skipping malformed discovery link %r: %s", href, exc)
+            continue
         job_id = extract_job_id(url)
         if not job_id or job_id in seen:
             continue
@@ -80,7 +84,11 @@ def extract_job_links_from_json(payload: Any, base_url: str = config.BASE_URL) -
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for raw in _json_candidates(payload):
-        url = canonicalize_url(raw, base_url=base_url)
+        try:
+            url = canonicalize_url(raw, base_url=base_url)
+        except Exception as exc:
+            LOGGER.debug("Skipping malformed discovery URL %r: %s", raw, exc)
+            continue
         job_id = extract_job_id(url)
         if not job_id or job_id in seen:
             continue
