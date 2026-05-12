@@ -16,6 +16,12 @@ from ..topics import TOPIC_OTHER, default_topic_labels, normalize_topic_filters
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+def _parse_checkbox_param(value: str | None) -> bool:
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"", "0", "false", "off", "no"}
+
+
 def create_app(
     *,
     db_path: Path | str | None = None,
@@ -332,8 +338,8 @@ def create_app(
         language: str | None = Query(None, description="ISO 639-1 language code, e.g. en, de, fr"),
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
-        active_only: bool = Query(True),
-        open_only: bool = Query(True),
+        active_only: str | None = Query(None),
+        open_only: str | None = Query(None),
         debug: bool = Query(False),
         min_role_confidence: int = Query(0, ge=0, le=100),
         min_topic_confidence: int = Query(0, ge=0, le=100),
@@ -350,8 +356,8 @@ def create_app(
             language=language,
             page=page,
             page_size=page_size,
-            active_only=active_only,
-            open_only=open_only,
+            active_only=_parse_checkbox_param(active_only),
+            open_only=_parse_checkbox_param(open_only),
             debug=debug,
             min_role_confidence=min_role_confidence,
             min_topic_confidence=min_topic_confidence,

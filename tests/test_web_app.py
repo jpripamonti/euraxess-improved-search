@@ -167,6 +167,19 @@ def test_search_page_warns_when_include_and_exclude_topics_overlap(tmp_path):
     assert "Topic selections overlap" in response.text
 
 
+def test_search_page_preserves_unchecked_availability_boxes(tmp_path):
+    db_path = tmp_path / "app.db"
+    _seed_db(db_path)
+    app = create_app(db_path=db_path, index_dir=tmp_path / "index")
+    client = TestClient(app)
+
+    response = client.get("/search", params={"q": "", "job_type": "all"})
+
+    assert response.status_code == 200
+    assert 'name="active_only" value="true" checked' not in response.text
+    assert 'name="open_only" value="true" checked' not in response.text
+
+
 def test_search_page_hides_role_confidence_below_selected_threshold(tmp_path):
     db_path = tmp_path / "app.db"
     _seed_db(db_path)
